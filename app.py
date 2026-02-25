@@ -440,6 +440,68 @@ def seed_full_day():
     return f"""<div style="font-family:sans-serif;text-align:center;padding:50px;background:#111;color:white;">
     <h1 style="color:#48bb78;">✓ System Seeded</h1><p>Added {added} complex medications.</p>
     <a href='/dashboard' style="background:#0a84ff;color:white;padding:15px;text-decoration:none;border-radius:20px;">Back to Dashboard</a></div>"""
+# ==================== ROBOT API (NO LOGIN REQUIRED) ====================
+
+@app.route('/api/robot/check/<int:user_id>')
+def robot_check_schedule(user_id):
+    """
+    The robot calls this to see if there are PENDING tasks right now.
+    We pass user_id manually because there is no logged-in user session.
+    """
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    due_tasks = []
+    now_time = datetime.now().strftime("%H:%M")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_day = datetime.now().strftime("%a")
+
+    for patient in user.patients:
+        for med in patient.medications:
+            # 1. Check if it's the right day
+            if (med.frequency == "Daily") or (med.days and today_day in med.days):
+                # 2. Check if already taken today
+                if med.last_taken != today_str:
+                    # 3. Check if it is TIME (or past time)
+                    if med.schedule_time <= now_time:
+                        # Found a task that is DUE and NOT TAKEN
+                        due_tasks.append({
+                            "med_id": med.id,
+                            "medicine": med.name,
+                            "dosage": med.dosage,
+                            "patient": patient.name,
+                            "location": "Bed 1" # You can add location logic later
+                        })
+    
+    return jsonify(due_tasks)
+
+@app.route('/api/robot/complete', methods=['POST'])
+def robot_mark_complete():
+    """
+    Robot calls this to mark a pill as dispensed.
+    """
+    data = request.json
+    med_id = data.get('med_id')
+    med = Medication.query.get(med_id)
+    
+    if med:
+        # Mark as taken for today
+        med.last_taken = datetime.now().strftime("%Y-%m-%d")
+        
+        # Decrease stock
+        if med.stock > 0:
+            med.stock -= 1
+            
+        # Log it
+        # Note: We hardcode user_id=1 or find it via patient because we don't have current_user
+        log = ActivityLog(user_id=med.patient.user_id, action=f"Robot Dispensed {med.name}", details="Auto-dispensed by Pi")
+        db.session.add(log)
+        db.session.commit()
+        return jsonify({"success": True})
+        
+    return jsonify({"success": False}), 400
+
 
 # ==================== RUN APP ====================
 if __name__ == '__main__':
