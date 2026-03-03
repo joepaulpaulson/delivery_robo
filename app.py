@@ -3,6 +3,7 @@ from datetime import datetime
 import json
 import time
 import smtplib
+import re
 from email.mime.text import MIMEText
 from dotenv import load_dotenv 
 
@@ -25,11 +26,13 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'da
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # --- EMAIL CONFIGURATION (For SOS Alerts) ---
+# --- EMAIL CONFIGURATION (For SOS Alerts) ---
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
-SENDER_EMAIL = os.getenv('MAIL_USERNAME', 'your-project-email@gmail.com') 
-SENDER_PASSWORD = os.getenv('MAIL_PASSWORD', 'your-app-password') 
-CAREGIVER_EMAIL = "caregiver-email@example.com" 
+SENDER_EMAIL = os.getenv('MAIL_USERNAME') 
+SENDER_PASSWORD = os.getenv('MAIL_PASSWORD') 
+# Update this line to read from .env
+CAREGIVER_EMAIL = os.getenv('CAREGIVER_EMAIL', 'fallback@example.com')
 
 db = SQLAlchemy(app)
 login_manager = LoginManager()
@@ -314,6 +317,71 @@ def get_inventory():
                 "instructions": med.instructions
             })
     return jsonify(inventory)
+
+# ==================== GOLD STANDARD SYMPTOM CHECKER API ====================
+
+# 1. Deterministic Safety Layer (Red Flags)
+RED_FLAGS = ["chest pain", "shortness of breath", "numbness", "severe bleeding", "difficulty breathing", "stroke"]
+
+def contains_emergency(text):
+    return any(flag in text.lower() for flag in RED_FLAGS)
+
+@app.route('/api/ai/symptom-check', methods=['POST'])
+@login_required
+def symptom_check():
+    user_input = request.json.get('symptoms', '')
+    
+    if not AI_AVAILABLE:
+        return jsonify({'success': False, 'message': "AI service currently unavailable."})
+
+    # --- STEP 1: SAFETY CHECK ---
+    if contains_emergency(user_input):
+        emergency_msg = "🚨 This sounds like a medical emergency. Please stop this chat and call emergency services (911) immediately."
+        # Optional: Trigger your existing email alert system
+        send_emergency_email(current_user.username, f"Emergency symptoms reported: {user_input}")
+        return jsonify({'success': True, 'is_emergency': True, 'response': emergency_msg})
+
+    # --- STEP 2: HYBRID PROMPT (Grounded in context) ---
+    # We include user context (meds) so the AI knows what they are already taking
+    med_context = get_user_context()
+    
+    system_instruction = f"""
+    You are an expert Medical Triage Assistant. 
+    CURRENT PATIENT MEDS: {med_context}
+    
+    INSTRUCTIONS:
+    1. Start with a brief disclaimer: "I am an AI, not a doctor."
+    2. Analyze the user's symptoms: "{user_input}"
+    3. Look for potential interactions with their current medications listed above.
+    4. Provide 2-3 possible causes, phrased strictly as possibilities.
+    5. Suggest the type of doctor they should see (e.g., "You should consult a Cardiologist").
+    6. If the symptoms are vague, ask 2 follow-up questions to narrow it down.
+    7. Be empathetic but professional.
+    """
+
+    try:
+        # Use a more capable model for reasoning if available
+        global model
+        response = model.generate_content(system_instruction)
+        
+        # --- STEP 3: LOGGING ---
+        # Add a log to your ActivityLog so the caregiver sees the symptom check
+        log = ActivityLog(
+            user_id=current_user.id, 
+            action="Symptom Check", 
+            details=f"User queried: {user_input[:50]}..."
+        )
+        db.session.add(log)
+        db.session.commit()
+
+        return jsonify({
+            'success': True, 
+            'is_emergency': False, 
+            'response': response.text
+        })
+    except Exception as e:
+        print(f"AI Error: {e}")
+        return jsonify({'success': False, 'error': "The AI agent is resting. Please try again later."})
 
 # ==================== VOICE AI API ====================
 @app.route('/api/voice/process', methods=['POST'])

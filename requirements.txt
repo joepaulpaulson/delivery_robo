@@ -5,3 +5,6 @@ Flask-Cors
 werkzeug
 google-generativeai
 python-dotenv
+langchain
+faiss-cpu
+sentence-transformers

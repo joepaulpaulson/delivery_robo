@@ -400,3 +400,64 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+// ==================== 4. AI DIAGNOSTIC AGENT LOGIC ====================
+window.submitSymptomCheck = async () => {
+    const input = document.getElementById('aiSymptomInput');
+    const history = document.getElementById('aiChatHistory');
+    const loading = document.getElementById('aiLoadingIndicator');
+    
+    if (!input || !history) return;
+    
+    const text = input.value.trim();
+    if (!text) return;
+
+    // 1. UI Feedback: Add user message & show loading
+    history.innerHTML += `<div class="ai-message user">${text}</div>`;
+    input.value = '';
+    loading.style.display = 'block';
+    history.scrollTop = history.scrollHeight;
+
+    try {
+        const response = await fetch('/api/ai/symptom-check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symptoms: text })
+        });
+
+        const data = await response.json();
+        loading.style.display = 'none';
+
+        if (data.success) {
+            // Apply emergency styling if the backend flagged RED_FLAGS
+            const typeClass = data.is_emergency ? 'bot emergency' : 'bot';
+            
+            // If it's an emergency, we can also trigger the robot drawer for help/water
+            if (data.is_emergency) isDrawerOpen = true;
+
+            history.innerHTML += `
+                <div class="ai-message ${typeClass}">
+                    <strong>MediBot:</strong><br>
+                    ${data.response.replace(/\n/g, '<br>')}
+                </div>`;
+        } else {
+            history.innerHTML += `<div class="ai-message bot" style="color:#ff453a;">System: ${data.message}</div>`;
+        }
+    } catch (err) {
+        loading.style.display = 'none';
+        console.error("AI Agent Error:", err);
+        history.innerHTML += `<div class="ai-message bot">Connection to Jacob's AI failed.</div>`;
+    }
+    
+    // Auto-scroll to latest message
+    history.scrollTop = history.scrollHeight;
+};
+
+// Allow pressing "Enter" in the symptom input box
+document.addEventListener('DOMContentLoaded', () => {
+    const aiInput = document.getElementById('aiSymptomInput');
+    if (aiInput) {
+        aiInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') window.submitSymptomCheck();
+        });
+    }
+});
