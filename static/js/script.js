@@ -452,6 +452,44 @@ window.submitSymptomCheck = async () => {
     history.scrollTop = history.scrollHeight;
 };
 
+// ==================== 5. CONCIERGE REDIRECT LOGIC ====================
+let activeConciergeTab = 'meds';
+
+window.switchConciergeTab = (tab) => {
+    activeConciergeTab = tab;
+    const medsBtn = document.getElementById('tab-meds');
+    const foodBtn = document.getElementById('tab-food');
+    const input = document.getElementById('conciergeSearch');
+
+    if (tab === 'meds') {
+        medsBtn.classList.add('active');
+        foodBtn.classList.remove('active');
+        input.placeholder = "Search 1mg for medicines...";
+    } else {
+        foodBtn.classList.add('active');
+        medsBtn.classList.remove('active');
+        input.placeholder = "Search Swiggy for healthy food...";
+    }
+};
+
+window.handleConciergeRedirect = () => {
+    const query = document.getElementById('conciergeSearch').value.trim();
+    if (!query) return alert("Please enter what you are looking for.");
+
+    let url = "";
+    if (activeConciergeTab === 'meds') {
+        // Direct search on 1mg.com
+        url = `https://www.1mg.com/search/all?name=${encodeURIComponent(query)}`;
+    } else {
+        // Direct search on Swiggy.com
+        // Note: Swiggy's web search uses the following structure
+        url = `https://www.swiggy.com/search?query=${encodeURIComponent(query)}`;
+    }
+
+    // Open in a new tab so the Jacob Control Center stays active
+    window.open(url, '_blank');
+};
+
 // Allow pressing "Enter" in the symptom input box
 document.addEventListener('DOMContentLoaded', () => {
     const aiInput = document.getElementById('aiSymptomInput');

@@ -343,8 +343,7 @@ def symptom_check():
 
     # --- STEP 2: HYBRID PROMPT (Grounded in context) ---
     # We include user context (meds) so the AI knows what they are already taking
-    med_context = get_user_context()
-    
+    med_context = get_user_context() 
     system_instruction = f"""
     You are an expert Medical Triage Assistant. 
     CURRENT PATIENT MEDS: {med_context}

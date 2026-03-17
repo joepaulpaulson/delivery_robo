@@ -379,6 +379,32 @@ body {
     display: none !important;
 }
 
+
+.tab-switcher {
+    display: flex;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 4px;
+    border-radius: 10px;
+    margin-bottom: 15px;
+}
+
+.tab-switcher button {
+    flex: 1;
+    background: none;
+    border: none;
+    color: #8e8e93;
+    padding: 8px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: 0.3s;
+}
+
+.tab-switcher button.active {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
 /* The Modal Box Base Style */
 .modal-box {
     background: #1c1c1e;
