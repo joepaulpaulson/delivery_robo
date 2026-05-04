@@ -74,6 +74,7 @@ class Patient(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     name = db.Column(db.String(100), nullable=False)
     medications = db.relationship('Medication', backref='patient', lazy=True)
+    room_number = db.Column(db.String(10), nullable=False)
 
 class Medication(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -469,6 +470,12 @@ def handle_request():
     db.session.commit()
     
     return jsonify({'success': True, 'message': f'{req_type} request processed'})
+
+
+
+@app.route('/api/robot/get_state')
+def get_robot_state():
+    return jsonify(robot_state)
 
 # ==================== SEEDING (UPDATED) ====================
 @app.route('/seed_full_day')

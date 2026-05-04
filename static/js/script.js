@@ -452,6 +452,7 @@ window.submitSymptomCheck = async () => {
     history.scrollTop = history.scrollHeight;
 };
 
+
 // ==================== 5. CONCIERGE REDIRECT LOGIC ====================
 let activeConciergeTab = 'meds';
 
