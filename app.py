@@ -540,12 +540,12 @@ def robot_check_schedule(user_id):
                     # 3. Check if it is TIME (or past time)
                     if med.schedule_time <= now_time:
                         # Found a task that is DUE and NOT TAKEN
-                        due_tasks.append({
+                      due_tasks.append({
                             "med_id": med.id,
                             "medicine": med.name,
                             "dosage": med.dosage,
                             "patient": patient.name,
-                            "location": "Bed 1" # You can add location logic later
+                            "room": patient.room_number   # ✅ dynamic room mapping
                         })
     
     return jsonify(due_tasks)
