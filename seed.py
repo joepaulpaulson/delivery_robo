@@ -8,10 +8,11 @@ sys.path.append(os.path.dirname(__file__))
 from app import app, db, User, Patient, Medication
 from werkzeug.security import generate_password_hash
 
+
 def seed():
     with app.app_context():
 
-        print("🧹 Clearing old data...")
+        print("🧹 Resetting database...")
         db.drop_all()
         db.create_all()
 
@@ -26,13 +27,11 @@ def seed():
         # ================= TIME SETUP =================
         now = datetime.now()
 
-        past_time = (now - timedelta(minutes=5)).strftime("%H:%M")
-        current_time = now.strftime("%H:%M")
-        future_time = (now + timedelta(minutes=5)).strftime("%H:%M")
+        john_time = now.strftime("%H:%M")  # immediate
+        alice_time = (now + timedelta(minutes=3)).strftime("%H:%M")  # +3 min
 
-        print(f"⏰ Past: {past_time}")
-        print(f"⏰ Now: {current_time}")
-        print(f"⏰ Future: {future_time}")
+        print(f"\n⏰ John Time (Immediate): {john_time}")
+        print(f"⏰ Alice Time (+3 min): {alice_time}")
 
         # ================= PATIENTS =================
         p1 = Patient(name="John", user_id=user.id, room_number="A-101")
@@ -43,58 +42,60 @@ def seed():
 
         # ================= MEDICATIONS =================
         meds = [
-            # PAST (should trigger immediately)
+
+            # JOHN → immediate execution
             Medication(
                 patient_id=p1.id,
                 name="Paracetamol",
                 dosage="1 tablet",
                 stock=30,
                 max_stock=30,
-                schedule_time=past_time,
+                schedule_time=john_time,
                 instructions="Pain relief",
                 frequency="Daily",
-                days="All"
+                days="All",
+                last_taken=None
             ),
 
-            # CURRENT
-            Medication(
-                patient_id=p1.id,
-                name="Aspirin",
-                dosage="75mg",
-                stock=30,
-                max_stock=30,
-                schedule_time=current_time,
-                instructions="Heart",
-                frequency="Daily",
-                days="All"
-            ),
-
-            # FUTURE (+5 min)
+            # ALICE → after 3 minutes
             Medication(
                 patient_id=p2.id,
                 name="Metformin",
                 dosage="500mg",
                 stock=30,
                 max_stock=30,
-                schedule_time=future_time,
+                schedule_time=alice_time,
                 instructions="Diabetes",
                 frequency="Daily",
-                days="All"
+                days="All",
+                last_taken=None
             )
         ]
 
         db.session.add_all(meds)
         db.session.commit()
 
-        print("\n✅ SEED COMPLETE")
-        print("👤 User: admin / admin123")
-        print("👨‍⚕️ Patients:")
-        print("   - John (A-101)")
-        print("   - Alice (A-102)")
-        print("💊 Meds:")
-        print("   - Past → triggers immediately")
-        print("   - Now → triggers now")
-        print("   - Future → triggers in 5 mins")
+        # ================= OUTPUT =================
+        print("\n✅ SEED COMPLETE\n")
+
+        print("👤 LOGIN:")
+        print("   Username: admin")
+        print("   Password: admin123\n")
+
+        print("👨‍⚕️ PATIENTS:")
+        print("   - John → Room A-101")
+        print("   - Alice → Room A-102\n")
+
+        print("🤖 EXECUTION FLOW:")
+        print("   1. Robot serves John immediately")
+        print("   2. Robot returns to base")
+        print("   3. Waits 3 minutes")
+        print("   4. Robot serves Alice")
+        print("   5. Robot returns to base\n")
+
+        print("💡 NOTE:")
+        print("   Make sure your Pi is running and polling every 5 seconds.")
+
 
 if __name__ == "__main__":
     seed()
