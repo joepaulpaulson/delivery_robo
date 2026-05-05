@@ -151,6 +151,11 @@
                         <input type="text" class="p-name" placeholder="e.g. Grandma Rose">
                     </div>
 
+                    <div class="input-row">
+                        <label>Room Number</label>
+                        <input type="text" class="p-room" placeholder="e.g. A-101" value="A-101">
+                    </div>
+
                     <div id="meds-${id}"></div>
 
                     <button class="btn-add-row" onclick="addMedRow('${id}')">
@@ -260,10 +265,15 @@
         async function submitSetup() {
             const patients = [];
             const cards = document.querySelectorAll('.ios-group');
+            const roomPattern = /^[A-Z]-\d{3}$/;
 
             for (let card of cards) {
-                const name = card.querySelector('.p-name').value;
+                const name = card.querySelector('.p-name').value.trim();
+                const roomNumber = card.querySelector('.p-room').value.trim().toUpperCase();
                 if (!name) continue;
+                if (!roomPattern.test(roomNumber)) {
+                    return alert(`Please use a valid room format like A-101 for ${name}.`);
+                }
                 
                 const meds = [];
                 const rows = card.querySelectorAll('.med-item');
@@ -291,7 +301,7 @@
                         });
                     }
                 }
-                if(meds.length > 0) patients.push({ name, meds });
+                if(meds.length > 0) patients.push({ name, room_number: roomNumber, meds });
             }
             
             if(patients.length === 0) return alert("Please add at least one patient and medication.");

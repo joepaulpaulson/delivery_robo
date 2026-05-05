@@ -147,29 +147,33 @@
         <div class="stats-container" style="margin-bottom: 30px;">
             <div class="log-card" style="display:block; padding: 25px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                    <h3 style="margin:0; font-size:1.2rem;">Adherence Analytics</h3>
-                    <span class="inv-badge status-ok">Weekly Report</span>
+                    <h3 style="margin:0; font-size:1.2rem;">Adherence Snapshot</h3>
+                    <span class="inv-badge status-ok">Live Data</span>
                 </div>
                 
                 <div style="display:flex; align-items:center; justify-content:space-around; flex-wrap:wrap; gap:20px;">
                     <div style="width:140px; height:140px; position:relative;">
                         <canvas id="adherenceChart"></canvas>
-                        <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); font-weight:800; font-size:1.5rem;">92%</div>
+                        <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); font-weight:800; font-size:1.5rem;">{{ stats.score }}%</div>
                     </div>
 
                     <div style="text-align:left;">
                         <div style="margin-bottom:15px;">
-                            <div style="font-size:0.8rem; color:#8e8e93;">Total Doses</div>
-                            <div style="font-size:1.5rem; font-weight:700;">24</div>
+                            <div style="font-size:0.8rem; color:#8e8e93;">Today's Scheduled Doses</div>
+                            <div style="font-size:1.5rem; font-weight:700;">{{ stats.total }}</div>
                         </div>
                         <div style="display:flex; gap:20px;">
                             <div>
                                 <div style="font-size:0.8rem; color:#30d158;">Taken</div>
-                                <div style="font-size:1.2rem; font-weight:600;">22</div>
+                                <div style="font-size:1.2rem; font-weight:600;">{{ stats.taken }}</div>
                             </div>
                             <div>
                                 <div style="font-size:0.8rem; color:#ff453a;">Missed</div>
-                                <div style="font-size:1.2rem; font-weight:600;">2</div>
+                                <div style="font-size:1.2rem; font-weight:600;">{{ stats.missed }}</div>
+                            </div>
+                            <div>
+                                <div style="font-size:0.8rem; color:#0a84ff;">Queued</div>
+                                <div style="font-size:1.2rem; font-weight:600;">{{ stats.requests.queued }}</div>
                             </div>
                         </div>
                     </div>
@@ -220,7 +224,7 @@
                 data: {
                     labels: ['Taken', 'Missed'],
                     datasets: [{
-                        data: [22, 2], // You can make this dynamic later
+                        data: [{{ stats.taken }}, {{ stats.missed }}],
                         backgroundColor: ['#30d158', 'rgba(255, 69, 58, 0.2)'],
                         borderWidth: 0,
                         cutout: '80%',

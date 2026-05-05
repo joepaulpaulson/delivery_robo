@@ -1,27 +1,33 @@
-// ==================== A* PATHFINDING ENGINE (Responsive) ====================
-
 const canvas = document.getElementById('astarCanvas');
 const ctx = canvas.getContext('2d');
 const statusMsg = document.getElementById('pathStatus');
+const roomNameInput = document.getElementById('roomNameInput');
+const roomList = document.getElementById('roomList');
 
-// Dynamic Grid Config
 let CELL_SIZE = 25;
-let COLS, ROWS;
-let grid = []; 
-let start = { x: 2, y: 2 };
-let end = { x: 10, y: 10 }; // Safe default
+let COLS = 0;
+let ROWS = 0;
+let grid = [];
+let base = { x: 2, y: 2 };
+let roomMarkers = {};
+let previewRoom = null;
 let currentMode = 'wall';
 let isDragging = false;
 
-// ==================== INITIALIZATION & RESPONSIVENESS ====================
+function normalizeRoomName(value) {
+    return (value || '').trim().toUpperCase();
+}
+
+function isValidRoomName(value) {
+    return /^[A-Z]-\d{3}$/.test(normalizeRoomName(value));
+}
 
 function initCanvas() {
-    const maxWidth = window.innerWidth * 0.95; // 95% of screen width
-    const maxHeight = window.innerHeight * 0.6; // 60% of screen height
+    const maxWidth = window.innerWidth * 0.95;
+    const maxHeight = window.innerHeight * 0.6;
 
-    // Desktop vs Mobile sizing
     if (window.innerWidth < 768) {
-        CELL_SIZE = 20; // Smaller cells on mobile
+        CELL_SIZE = 20;
         canvas.width = maxWidth;
         canvas.height = maxHeight;
     } else {
@@ -30,245 +36,370 @@ function initCanvas() {
         canvas.height = 500;
     }
 
-    COLS = Math.floor(canvas.width / CELL_SIZE);
-    ROWS = Math.floor(canvas.height / CELL_SIZE);
+    COLS = Math.max(Math.floor(canvas.width / CELL_SIZE), 1);
+    ROWS = Math.max(Math.floor(canvas.height / CELL_SIZE), 1);
 
-    // Update End Point if it's out of bounds after resize
-    if (end.x >= COLS) end.x = COLS - 2;
-    if (end.y >= ROWS) end.y = ROWS - 2;
+    if (base.x >= COLS) base.x = Math.max(COLS - 1, 0);
+    if (base.y >= ROWS) base.y = Math.max(ROWS - 1, 0);
 }
 
-// 1. Init Empty Grid
 function initEmptyGrid() {
     grid = new Array(COLS).fill(0).map(() => new Array(ROWS).fill(0));
 }
 
-// 2. Load Map
-async function loadMapFromDB() {
-    initCanvas(); // Ensure canvas is sized first
-    
-    try {
-        const res = await fetch('/api/map/load');
-        const data = await res.json();
-        
-        if (data.success && data.grid && data.grid.length === COLS && data.grid[0].length === ROWS) {
-            grid = data.grid;
-            console.log("Map loaded");
-        } else {
-            // Dimension mismatch or new map -> Reset
-            initEmptyGrid();
-            console.log("Starting blank map (dimensions changed or empty)");
-        }
-    } catch (error) {
-        initEmptyGrid();
+function ensureGridDimensions(savedGrid) {
+    if (
+        Array.isArray(savedGrid) &&
+        savedGrid.length === COLS &&
+        savedGrid.every((column) => Array.isArray(column) && column.length === ROWS)
+    ) {
+        grid = savedGrid;
+        return;
     }
-    solveAStar();
+    initEmptyGrid();
 }
 
-// 3. Save Map
-async function saveMapToDB() {
-    statusMsg.textContent = "Saving...";
-    statusMsg.style.color = '#fff';
-    try {
-        const res = await fetch('/api/map/save', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ grid: grid })
-        });
-        const data = await res.json();
-        if(data.success) {
-            statusMsg.textContent = "Layout Saved!";
-            statusMsg.style.color = '#30d158'; // Green
-            setTimeout(() => solveAStar(), 2000);
-        }
-    } catch (e) { alert("Failed to save map"); }
+function sanitizeBase(candidate) {
+    if (!candidate || typeof candidate !== 'object') {
+        return { x: 2, y: 2 };
+    }
+    const x = Number.isInteger(candidate.x) ? candidate.x : 2;
+    const y = Number.isInteger(candidate.y) ? candidate.y : 2;
+    return {
+        x: Math.min(Math.max(x, 0), Math.max(COLS - 1, 0)),
+        y: Math.min(Math.max(y, 0), Math.max(ROWS - 1, 0)),
+    };
 }
 
-// ==================== ALGORITHM (A-Star) ====================
+function sanitizeRooms(rooms) {
+    const normalized = {};
+    if (!rooms || typeof rooms !== 'object') {
+        return normalized;
+    }
 
-function solveAStar() {
-    let openSet = [];
-    let closedSet = [];
-    let path = [];
-
-    // Ensure start/end are valid
-    if(start.x >= COLS || start.y >= ROWS) start = {x:0, y:0};
-    if(end.x >= COLS || end.y >= ROWS) end = {x:COLS-1, y:ROWS-1};
-
-    if (grid[start.x][start.y] === 1) grid[start.x][start.y] = 0;
-    if (grid[end.x][end.y] === 1) grid[end.x][end.y] = 0;
-
-    let startNode = { x: start.x, y: start.y, g: 0, h: 0, f: 0, parent: null };
-    openSet.push(startNode);
-
-    while (openSet.length > 0) {
-        let lowestIndex = 0;
-        for (let i = 0; i < openSet.length; i++) {
-            if (openSet[i].f < openSet[lowestIndex].f) lowestIndex = i;
-        }
-        let current = openSet[lowestIndex];
-
-        if (current.x === end.x && current.y === end.y) {
-            let temp = current;
-            path.push(temp);
-            while (temp.parent) {
-                path.push(temp.parent);
-                temp = temp.parent;
-            }
-            statusMsg.textContent = `Path Found: ${path.length} steps`;
-            statusMsg.style.color = '#30d158';
-            draw(path); 
+    Object.entries(rooms).forEach(([roomName, coords]) => {
+        const normalizedName = normalizeRoomName(roomName);
+        if (!isValidRoomName(normalizedName) || !coords || typeof coords !== 'object') {
             return;
         }
 
-        openSet.splice(lowestIndex, 1);
-        closedSet.push(current);
-
-        let neighbors = getNeighbors(current);
-        for (let i = 0; i < neighbors.length; i++) {
-            let neighbor = neighbors[i];
-
-            if (!closedSet.find(n => n.x === neighbor.x && n.y === neighbor.y) && grid[neighbor.x][neighbor.y] !== 1) {
-                let tempG = current.g + 1;
-                let newPath = false;
-                let existingNode = openSet.find(n => n.x === neighbor.x && n.y === neighbor.y);
-                
-                if (existingNode) {
-                    if (tempG < existingNode.g) {
-                        existingNode.g = tempG;
-                        newPath = true;
-                        neighbor = existingNode;
-                    }
-                } else {
-                    neighbor.g = tempG;
-                    newPath = true;
-                    openSet.push(neighbor);
-                }
-
-                if (newPath) {
-                    neighbor.h = Math.abs(neighbor.x - end.x) + Math.abs(neighbor.y - end.y);
-                    neighbor.f = neighbor.g + neighbor.h;
-                    neighbor.parent = current;
-                }
-            }
+        const x = Number.isInteger(coords.x) ? coords.x : null;
+        const y = Number.isInteger(coords.y) ? coords.y : null;
+        if (x === null || y === null || x < 0 || y < 0 || x >= COLS || y >= ROWS) {
+            return;
         }
+
+        normalized[normalizedName] = { x, y };
+    });
+
+    return normalized;
+}
+
+function roomAtCell(x, y) {
+    return Object.entries(roomMarkers).find(([, coords]) => coords.x === x && coords.y === y)?.[0] || null;
+}
+
+function renderRoomList() {
+    roomList.innerHTML = '';
+    const roomNames = Object.keys(roomMarkers).sort();
+
+    if (roomNames.length === 0) {
+        roomList.innerHTML = '<div class="room-chip">No rooms mapped yet</div>';
+        return;
     }
 
-    statusMsg.textContent = "No Path Available";
-    statusMsg.style.color = '#ff453a';
-    draw([]); 
+    roomNames.forEach((roomName) => {
+        const chip = document.createElement('button');
+        chip.className = `room-chip${previewRoom === roomName ? ' active' : ''}`;
+        chip.textContent = roomName;
+        chip.title = 'Click to preview route. Double-click to remove.';
+        chip.addEventListener('click', () => {
+            previewRoom = roomName;
+            drawPreviewPath();
+        });
+        chip.addEventListener('dblclick', () => {
+            delete roomMarkers[roomName];
+            if (previewRoom === roomName) {
+                previewRoom = Object.keys(roomMarkers)[0] || null;
+            }
+            drawPreviewPath();
+        });
+        roomList.appendChild(chip);
+    });
+}
+
+function saveStatus(message, color = '#8e8e93') {
+    statusMsg.textContent = message;
+    statusMsg.style.color = color;
+}
+
+async function loadMapFromDB() {
+    initCanvas();
+
+    try {
+        const res = await fetch('/api/map/load');
+        const data = await res.json();
+
+        if (data.success) {
+            ensureGridDimensions(data.grid);
+            base = sanitizeBase(data.base);
+            roomMarkers = sanitizeRooms(data.rooms);
+            previewRoom = previewRoom && roomMarkers[previewRoom] ? previewRoom : (Object.keys(roomMarkers)[0] || null);
+        } else {
+            initEmptyGrid();
+            roomMarkers = {};
+            previewRoom = null;
+        }
+    } catch (error) {
+        initEmptyGrid();
+        roomMarkers = {};
+        previewRoom = null;
+    }
+
+    drawPreviewPath();
+}
+
+async function saveMapToDB() {
+    saveStatus('Saving map...', '#ffffff');
+
+    try {
+        const payload = { grid, rooms: roomMarkers, base };
+        const res = await fetch('/api/map/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            saveStatus(`Map saved. ${Object.keys(roomMarkers).length} room(s) mapped.`, '#30d158');
+            return;
+        }
+
+        saveStatus(data.message || 'Failed to save map.', '#ff453a');
+    } catch (error) {
+        saveStatus('Failed to save map.', '#ff453a');
+    }
 }
 
 function getNeighbors(node) {
-    let neighbors = [];
-    let x = node.x;
-    let y = node.y;
-    if (x < COLS - 1) neighbors.push({ x: x + 1, y: y });
-    if (x > 0) neighbors.push({ x: x - 1, y: y });
-    if (y < ROWS - 1) neighbors.push({ x: x, y: y + 1 });
-    if (y > 0) neighbors.push({ x: x, y: y - 1 });
+    const neighbors = [];
+    if (node.x < COLS - 1) neighbors.push({ x: node.x + 1, y: node.y });
+    if (node.x > 0) neighbors.push({ x: node.x - 1, y: node.y });
+    if (node.y < ROWS - 1) neighbors.push({ x: node.x, y: node.y + 1 });
+    if (node.y > 0) neighbors.push({ x: node.x, y: node.y - 1 });
     return neighbors;
 }
 
-// ==================== RENDERING ====================
+function solveAStar(target) {
+    if (!target) return [];
+
+    const start = { x: base.x, y: base.y };
+    const goal = { x: target.x, y: target.y };
+
+    if (grid[start.x]?.[start.y] === 1) grid[start.x][start.y] = 0;
+    if (grid[goal.x]?.[goal.y] === 1) grid[goal.x][goal.y] = 0;
+
+    const openSet = [{ x: start.x, y: start.y, g: 0, h: 0, f: 0, parent: null }];
+    const closed = new Set();
+
+    while (openSet.length > 0) {
+        let lowestIndex = 0;
+        for (let i = 1; i < openSet.length; i += 1) {
+            if (openSet[i].f < openSet[lowestIndex].f) {
+                lowestIndex = i;
+            }
+        }
+
+        const current = openSet.splice(lowestIndex, 1)[0];
+        const currentKey = `${current.x},${current.y}`;
+        closed.add(currentKey);
+
+        if (current.x === goal.x && current.y === goal.y) {
+            const path = [];
+            let cursor = current;
+            while (cursor) {
+                path.push({ x: cursor.x, y: cursor.y });
+                cursor = cursor.parent;
+            }
+            return path.reverse();
+        }
+
+        const neighbors = getNeighbors(current);
+        neighbors.forEach((neighbor) => {
+            const key = `${neighbor.x},${neighbor.y}`;
+            if (closed.has(key) || grid[neighbor.x][neighbor.y] === 1) {
+                return;
+            }
+
+            const tentativeG = current.g + 1;
+            let existing = openSet.find((node) => node.x === neighbor.x && node.y === neighbor.y);
+
+            if (!existing) {
+                existing = { ...neighbor, g: tentativeG, h: 0, f: 0, parent: current };
+                openSet.push(existing);
+            } else if (tentativeG >= existing.g) {
+                return;
+            } else {
+                existing.g = tentativeG;
+                existing.parent = current;
+            }
+
+            existing.h = Math.abs(existing.x - goal.x) + Math.abs(existing.y - goal.y);
+            existing.f = existing.g + existing.h;
+        });
+    }
+
+    return [];
+}
 
 function draw(path = []) {
-    // Clear
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw Grid & Walls
-    for (let i = 0; i < COLS; i++) {
-        for (let j = 0; j < ROWS; j++) {
+    for (let i = 0; i < COLS; i += 1) {
+        for (let j = 0; j < ROWS; j += 1) {
             if (grid[i][j] === 1) {
-                // Wall Color (Dark Gray)
-                ctx.fillStyle = '#4a4a4a'; 
+                ctx.fillStyle = '#4a4a4a';
                 ctx.fillRect(i * CELL_SIZE + 1, j * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2);
             } else {
-                // Grid Lines (Subtle)
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)'; 
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
                 ctx.strokeRect(i * CELL_SIZE, j * CELL_SIZE, CELL_SIZE, CELL_SIZE);
             }
         }
     }
 
-    // Draw Path (Blue Neon)
-    for (let i = 0; i < path.length; i++) {
-        ctx.fillStyle = 'rgba(10, 132, 255, 0.6)'; 
-        ctx.fillRect(path[i].x * CELL_SIZE + 1, path[i].y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2);
-    }
+    path.forEach((node) => {
+        ctx.fillStyle = 'rgba(10, 132, 255, 0.4)';
+        ctx.fillRect(node.x * CELL_SIZE + 1, node.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2);
+    });
 
-    // Draw Start (Green)
+    Object.entries(roomMarkers).forEach(([roomName, coords]) => {
+        ctx.fillStyle = previewRoom === roomName ? '#ff9f0a' : '#ff453a';
+        ctx.fillRect(coords.x * CELL_SIZE + 3, coords.y * CELL_SIZE + 3, CELL_SIZE - 6, CELL_SIZE - 6);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '12px Inter, sans-serif';
+        ctx.fillText(roomName, coords.x * CELL_SIZE + 4, coords.y * CELL_SIZE + CELL_SIZE - 6);
+    });
+
     ctx.fillStyle = '#30d158';
-    ctx.fillRect(start.x * CELL_SIZE + 1, start.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2);
+    ctx.fillRect(base.x * CELL_SIZE + 1, base.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 12px Inter, sans-serif';
+    ctx.fillText('BASE', base.x * CELL_SIZE + 2, base.y * CELL_SIZE + 14);
 
-    // Draw End (Red)
-    ctx.fillStyle = '#ff453a';
-    ctx.fillRect(end.x * CELL_SIZE + 1, end.y * CELL_SIZE + 1, CELL_SIZE - 2, CELL_SIZE - 2);
+    renderRoomList();
 }
 
-// ==================== INTERACTION (Mouse & Touch) ====================
+function drawPreviewPath() {
+    const target = previewRoom ? roomMarkers[previewRoom] : null;
+    if (!target) {
+        draw([]);
+        saveStatus(`Mapped rooms: ${Object.keys(roomMarkers).length}. Select "Place Room" to assign destinations.`);
+        return;
+    }
+
+    const path = solveAStar(target);
+    draw(path);
+
+    if (path.length > 0) {
+        saveStatus(`Preview route to ${previewRoom}: ${Math.max(path.length - 1, 0)} step(s).`, '#30d158');
+    } else {
+        saveStatus(`No path available from BASE to ${previewRoom}.`, '#ff453a');
+    }
+}
 
 function setMode(mode) {
     currentMode = mode;
-    document.querySelectorAll('.btn-control').forEach(b => b.classList.remove('active'));
-    let id = mode === 'wall' ? 'btnWall' : mode === 'start' ? 'btnStart' : 'btnEnd';
-    const btn = document.getElementById(id);
-    if(btn) btn.classList.add('active');
+    document.getElementById('btnWall').classList.toggle('active', mode === 'wall');
+    document.getElementById('btnBase').classList.toggle('active', mode === 'base');
+    document.getElementById('btnRoom').classList.toggle('active', mode === 'room');
 }
 
 function handleInput(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
     const x = Math.floor((clientX - rect.left) / CELL_SIZE);
     const y = Math.floor((clientY - rect.top) / CELL_SIZE);
-    
+
     if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return;
 
     if (currentMode === 'wall') {
+        const mappedRoom = roomAtCell(x, y);
+        if ((base.x === x && base.y === y) || mappedRoom) {
+            return;
+        }
         grid[x][y] = grid[x][y] === 1 ? 0 : 1;
-    } else if (currentMode === 'start') {
-        start = { x, y };
-        grid[x][y] = 0;
-    } else if (currentMode === 'end') {
-        end = { x, y };
-        grid[x][y] = 0;
     }
-    
-    solveAStar();
+
+    if (currentMode === 'base') {
+        base = { x, y };
+        grid[x][y] = 0;
+        const roomName = roomAtCell(x, y);
+        if (roomName) delete roomMarkers[roomName];
+    }
+
+    if (currentMode === 'room') {
+        const roomName = normalizeRoomName(roomNameInput.value);
+        if (!isValidRoomName(roomName)) {
+            saveStatus('Enter a room like A-101 before placing a marker.', '#ff453a');
+            return;
+        }
+        grid[x][y] = 0;
+        roomMarkers[roomName] = { x, y };
+        previewRoom = roomName;
+    }
+
+    drawPreviewPath();
 }
 
 function clearWalls() {
     initEmptyGrid();
-    solveAStar();
+    Object.values(roomMarkers).forEach((coords) => {
+        if (coords.x < COLS && coords.y < ROWS) {
+            grid[coords.x][coords.y] = 0;
+        }
+    });
+    if (base.x < COLS && base.y < ROWS) {
+        grid[base.x][base.y] = 0;
+    }
+    drawPreviewPath();
 }
 
-// Mouse Events
-canvas.addEventListener('mousedown', (e) => { isDragging = true; handleInput(e.clientX, e.clientY); });
-canvas.addEventListener('mousemove', (e) => { if (isDragging && currentMode === 'wall') handleInput(e.clientX, e.clientY); });
-window.addEventListener('mouseup', () => { isDragging = false; });
+canvas.addEventListener('mousedown', (event) => {
+    isDragging = true;
+    handleInput(event.clientX, event.clientY);
+});
 
-// Touch Events (Mobile)
-canvas.addEventListener('touchstart', (e) => { 
-    isDragging = true; 
-    handleInput(e.touches[0].clientX, e.touches[0].clientY);
-    e.preventDefault(); // Prevent scrolling
-}, {passive: false});
-
-canvas.addEventListener('touchmove', (e) => { 
+canvas.addEventListener('mousemove', (event) => {
     if (isDragging && currentMode === 'wall') {
-        handleInput(e.touches[0].clientX, e.touches[0].clientY);
+        handleInput(event.clientX, event.clientY);
     }
-    e.preventDefault(); 
-}, {passive: false});
+});
 
-window.addEventListener('touchend', () => { isDragging = false; });
+window.addEventListener('mouseup', () => {
+    isDragging = false;
+});
 
-// Handle Resize
+canvas.addEventListener('touchstart', (event) => {
+    isDragging = true;
+    handleInput(event.touches[0].clientX, event.touches[0].clientY);
+    event.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (event) => {
+    if (isDragging && currentMode === 'wall') {
+        handleInput(event.touches[0].clientX, event.touches[0].clientY);
+    }
+    event.preventDefault();
+}, { passive: false });
+
+window.addEventListener('touchend', () => {
+    isDragging = false;
+});
+
 window.addEventListener('resize', () => {
-    // Reload map to adjust grid size (this resets walls if dimensions change drastically)
-    // For a production app, you'd want to interpolate old grid to new grid.
     loadMapFromDB();
 });
 
-// START
 loadMapFromDB();
 setMode('wall');

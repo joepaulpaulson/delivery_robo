@@ -167,6 +167,17 @@ let isDrawerOpen = false;
 // ==================== 2. SMART POLLING & RENDER LOGIC ====================
 let lastScheduleState = ""; // Cache
 
+function setStatusMessage(element, message, color) {
+    if (!element) return;
+    element.innerText = message;
+    if (color) element.style.color = color;
+}
+
+function syncRobotVisualFromAction(action) {
+    if (action === 'OPEN_DRAWER') isDrawerOpen = true;
+    if (action === 'CLOSE_DRAWER') isDrawerOpen = false;
+}
+
 function renderSchedule(data) {
     const scheduleContainer = document.getElementById('scheduleContainer');
     if(!scheduleContainer) return;
@@ -252,11 +263,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if(voiceMsg) { voiceMsg.innerText = `"${text}"`; voiceMsg.style.color = "#fff"; }
             if(voiceSub) voiceSub.innerText = "Processing...";
 
-            // Local Trigger
-            if (text.toLowerCase().includes("open")) isDrawerOpen = true;
-            if (text.toLowerCase().includes("close")) isDrawerOpen = false;
-
-            // API Call
             try {
                 const res = await fetch('/api/voice/process', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -264,13 +270,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 const result = await res.json();
                 if(result.success) {
-                    voiceMsg.innerText = result.message;
-                    voiceMsg.style.color = "#30d158"; 
-                    if(result.action === 'DISPENSE' || result.action === 'DISPENSE_MED') isDrawerOpen = true; 
+                    setStatusMessage(voiceMsg, result.message, "#30d158");
+                    syncRobotVisualFromAction(result.action);
                     window.fetchSchedule();
                 } else {
-                    voiceMsg.innerText = result.error || "Error";
-                    voiceMsg.style.color = "#ff453a"; 
+                    setStatusMessage(voiceMsg, result.message || result.error || "Error", "#ff453a");
                 }
             } catch(err) { console.error(err); }
             setTimeout(() => { if(voiceSub) voiceSub.innerText = "Tap to Speak"; }, 5000);
@@ -289,12 +293,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const text = manualInput.value.trim();
         if (!text) return;
 
-        responseArea.innerText = "Jacob is thinking...";
-        responseArea.style.color = "#aaa";
-        
-        // Immediate UI feedback
-        if (text.toLowerCase().includes("open")) isDrawerOpen = true;
-        if (text.toLowerCase().includes("close")) isDrawerOpen = false;
+        setStatusMessage(responseArea, "Queuing command...", "#aaa");
 
         try {
             const res = await fetch('/api/voice/process', {
@@ -305,18 +304,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await res.json();
             
             if(result.success) {
-                responseArea.innerText = result.message; 
-                responseArea.style.color = "#30d158"; // Green
-                if(result.action === 'DISPENSE' || result.action === 'DISPENSE_MED') isDrawerOpen = true; 
+                setStatusMessage(responseArea, result.message, "#30d158");
+                syncRobotVisualFromAction(result.action);
                 window.fetchSchedule();
             } else {
-                responseArea.innerText = result.error || "I didn't understand.";
-                responseArea.style.color = "#ff453a"; 
+                setStatusMessage(responseArea, result.message || result.error || "I didn't understand.", "#ff453a");
             }
         } catch(err) { 
             console.error(err);
-            responseArea.innerText = "Connection Error";
-            responseArea.style.color = "#ff453a";
+            setStatusMessage(responseArea, "Connection Error", "#ff453a");
         }
         manualInput.value = '';
     }
@@ -329,7 +325,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ==================== 3. GLOBAL FUNCTIONS ====================
 window.toggleTask = async (id) => { 
-    const res = await fetch('/api/task/toggle', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id}) });
+    await fetch('/api/task/toggle', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id}) });
     lastScheduleState = ""; // Force Refresh
     window.fetchSchedule();
 };
@@ -341,8 +337,8 @@ window.deleteTask = async (id) => {
 window.openAddModal = () => document.getElementById('addTaskModal').style.display = 'flex';
 
 window.submitNewTask = async () => {
-    const name = document.getElementById('newTaskName').value;
-    const dosage = document.getElementById('newTaskDosage').value;
+    const name = document.getElementById('newTaskName').value.trim();
+    const dosage = document.getElementById('newTaskDosage').value.trim();
     const time = document.getElementById('newTaskTime').value;
     const patientSelect = document.getElementById('newTaskPatient');
     const pid = patientSelect ? patientSelect.value : null;
@@ -366,8 +362,28 @@ window.submitNewTask = async () => {
 };
 
 window.sendRequest = async (type) => {
-    if (type === 'medicine' || type === 'water') isDrawerOpen = true;
-    try { await fetch('/api/request', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ type }) }); } catch(e){}
+    const voiceMsg = document.getElementById('voiceMessage');
+    const responseArea = document.getElementById('responseArea');
+
+    try {
+        const res = await fetch('/api/request', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ type })
+        });
+        const data = await res.json();
+        if (data.success) {
+            setStatusMessage(voiceMsg, data.message, "#30d158");
+            setStatusMessage(responseArea, data.message, "#30d158");
+        } else {
+            setStatusMessage(voiceMsg, data.message || "Request failed", "#ff453a");
+            setStatusMessage(responseArea, data.message || "Request failed", "#ff453a");
+        }
+    } catch(e) {
+        console.error(e);
+        setStatusMessage(voiceMsg, "Request failed", "#ff453a");
+        setStatusMessage(responseArea, "Request failed", "#ff453a");
+    }
 };
 
 // ==================== MOBILE MENU & DOTS ====================

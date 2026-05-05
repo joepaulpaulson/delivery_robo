@@ -23,7 +23,7 @@
             border-radius: 20px;
             border: 1px solid rgba(255, 255, 255, 0.1);
             margin-bottom: 20px;
-            display: aflex; gap: 8px; flex-wrap: wrap; justify-content: center;
+            display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
             box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
             max-width: 90%;
         }
@@ -41,6 +41,48 @@
         .btn-control.active { background: #fff; color: #000; font-weight: 600; }
         .btn-save { background: var(--ios-green); color: white; border: none; }
         .btn-clear { color: var(--ios-red); }
+
+        .room-input {
+            padding: 10px 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.06);
+            color: white;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.9rem;
+            min-width: 140px;
+        }
+
+        .room-list {
+            margin-top: 16px;
+            width: min(90%, 800px);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+        }
+
+        .room-chip {
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.08);
+            color: white;
+            font-size: 0.8rem;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .room-chip:hover,
+        .room-chip.active {
+            background: rgba(10, 132, 255, 0.2);
+            border-color: rgba(10, 132, 255, 0.45);
+        }
+
+        .room-chip.remove {
+            background: rgba(255, 69, 58, 0.12);
+            border-color: rgba(255, 69, 58, 0.3);
+        }
 
         /* The Canvas */
         canvas {
@@ -94,14 +136,16 @@
         
         <div class="controls-bar">
             <button class="btn-control active" onclick="setMode('wall')" id="btnWall">Draw Walls</button>
-            <button class="btn-control" onclick="setMode('start')" id="btnStart">Start</button>
-            <button class="btn-control" onclick="setMode('end')" id="btnEnd">Goal</button>
+            <button class="btn-control" onclick="setMode('base')" id="btnBase">Set Base</button>
+            <button class="btn-control" onclick="setMode('room')" id="btnRoom">Place Room</button>
+            <input id="roomNameInput" class="room-input" type="text" value="A-101" placeholder="Room e.g. A-101">
             <button class="btn-control btn-clear" onclick="clearWalls()">Clear</button>
             <button class="btn-control btn-save" onclick="saveMapToDB()">Save</button>
         </div>
 
         <canvas id="astarCanvas"></canvas>
-        <div class="status-msg" id="pathStatus">Path Found: 0 steps</div>
+        <div class="status-msg" id="pathStatus">Map the base, walls, and each room the robot should visit.</div>
+        <div class="room-list" id="roomList"></div>
         
     </div>
 
