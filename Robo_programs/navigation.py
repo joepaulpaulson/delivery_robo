@@ -1,6 +1,7 @@
-import requests
 import sys
 from pathlib import Path
+
+import requests
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -13,6 +14,13 @@ from config import Config
 STEP_DURATION = float(Config.GRID_STEP_SECONDS)
 TURN_DURATION = 0.8
 DEFAULT_HEADING = "N"
+HEADINGS = ["N", "E", "S", "W"]
+
+FALLBACK_ROUTES = {
+    "A-101": [("F", 5.0)],
+    "A-102": [("F", 7.0), ("L", 1.0), ("F", 3.0)],
+    "B-201": [("F", 10.0), ("R", 2.0)],
+}
 
 
 def reverse_command(command):
@@ -27,24 +35,37 @@ def reverse_command(command):
     return "S"
 
 
-def return_to_base(path, send_command):
-    print("Retracing path to base...")
-    for command, duration in reversed(path):
-        send_command(reverse_command(command), duration)
-    print("Returned to base")
+def turn_instructions(current_heading, target_heading):
+    current_index = HEADINGS.index(current_heading)
+    target_index = HEADINGS.index(target_heading)
+    delta = (target_index - current_index) % 4
+
+    if delta == 0:
+        return []
+    if delta == 1:
+        return ["R"]
+    if delta == 2:
+        return ["R", "R"]
+    return ["L"]
+
+
+def heading_after_commands(commands, initial_heading=DEFAULT_HEADING):
+    heading = initial_heading
+    for command, _ in commands:
+        if command == "R":
+            heading = HEADINGS[(HEADINGS.index(heading) + 1) % len(HEADINGS)]
+        elif command == "L":
+            heading = HEADINGS[(HEADINGS.index(heading) - 1) % len(HEADINGS)]
+    return heading
 
 
 def fetch_navigation_map(server_url, user_id):
-    try:
-        response = requests.get(f"{server_url}/api/robot/map/{user_id}", timeout=10)
-        response.raise_for_status()
-        payload = response.json()
-        if not payload.get("success"):
-            return None
-        return payload
-    except Exception as error:
-        print(f"Map fetch failed: {error}")
-        return None
+    response = requests.get(f"{server_url}/api/robot/map/{user_id}", timeout=10)
+    response.raise_for_status()
+    payload = response.json()
+    if not payload.get("success"):
+        raise ValueError("Navigation map request did not succeed.")
+    return payload
 
 
 def neighbors(node, cols, rows):
@@ -65,6 +86,10 @@ def find_path(grid, start, goal):
     cols = len(grid)
     rows = len(grid[0]) if cols else 0
     if not cols or not rows:
+        return []
+    if not (0 <= start[0] < cols and 0 <= start[1] < rows):
+        return []
+    if not (0 <= goal[0] < cols and 0 <= goal[1] < rows):
         return []
 
     frontier = [{"point": start, "g": 0, "h": 0, "f": 0, "parent": None}]
@@ -110,21 +135,6 @@ def find_path(grid, start, goal):
     return []
 
 
-def turn_instructions(current_heading, target_heading):
-    headings = ["N", "E", "S", "W"]
-    current_index = headings.index(current_heading)
-    target_index = headings.index(target_heading)
-    delta = (target_index - current_index) % 4
-
-    if delta == 0:
-        return []
-    if delta == 1:
-        return ["R"]
-    if delta == 2:
-        return ["R", "R"]
-    return ["L"]
-
-
 def build_command_sequence(path_cells, initial_heading=DEFAULT_HEADING):
     if len(path_cells) < 2:
         return [], initial_heading
@@ -166,53 +176,107 @@ def estimate_path_seconds(path_cells):
 
 
 def execute_path_cells(path_cells, send_command, initial_heading=DEFAULT_HEADING):
-    commands, final_heading = build_command_sequence(path_cells, initial_heading=initial_heading)
+    commands, final_heading = build_command_sequence(
+        path_cells,
+        initial_heading=initial_heading,
+    )
     execute_commands(commands, send_command)
     return commands, final_heading
 
 
-def generate_map_route(room, server_url, user_id):
-    payload = fetch_navigation_map(server_url, user_id)
-    if not payload:
-        return []
-
-    grid = payload.get("grid") or []
-    rooms = payload.get("rooms") or {}
-    base = payload.get("base") or {"x": 2, "y": 2}
-    target = rooms.get(room)
-
-    if not target or not grid:
-        return []
-
-    start = (int(base.get("x", 2)), int(base.get("y", 2)))
-    goal = (int(target.get("x")), int(target.get("y")))
-    path = find_path(grid, start, goal)
-    commands, _ = build_command_sequence(path)
-    return commands
-
-
-def navigate_to_room(room, send_command, server_url=None, user_id=None):
-    print(f"Navigation started for room: {room}")
-
-    if server_url and user_id:
-        mapped_route = generate_map_route(room, server_url, user_id)
-        if mapped_route:
-            print(f"Using saved map route for {room}")
-            execute_commands(mapped_route, send_command)
-            print("Reached destination")
-            return mapped_route
-
-    routes = {
-        "A-101": [("F", 5)],
-        "A-102": [("F", 7), ("L", 1), ("F", 3)],
-        "B-201": [("F", 10), ("R", 2)],
+def build_route_from_path(path_cells, *, initial_heading=DEFAULT_HEADING, source="map"):
+    commands, final_heading = build_command_sequence(
+        path_cells,
+        initial_heading=initial_heading,
+    )
+    return {
+        "source": source,
+        "path_cells": path_cells,
+        "commands": commands,
+        "final_heading": final_heading,
     }
 
-    path = routes.get(room)
-    if not path:
-        print("Unknown room. Using fallback path.")
-        path = [("F", 5)]
 
-    execute_commands(path, send_command)
+def fallback_route_for_room(room, initial_heading=DEFAULT_HEADING):
+    commands = FALLBACK_ROUTES.get(room)
+    if not commands:
+        raise ValueError(f"No mapped or fallback route found for room {room}.")
+
+    final_heading = heading_after_commands(commands, initial_heading=initial_heading)
+    return {
+        "source": "fallback",
+        "path_cells": [],
+        "commands": commands,
+        "final_heading": final_heading,
+    }
+
+
+def route_to_room(room, server_url=None, user_id=None, initial_heading=DEFAULT_HEADING):
+    if server_url and user_id:
+        payload = fetch_navigation_map(server_url, user_id)
+        grid = payload.get("grid") or []
+        rooms = payload.get("rooms") or {}
+        base = payload.get("base") or {"x": 2, "y": 2}
+        target = rooms.get(room)
+
+        if target and grid:
+            start = (int(base.get("x", 2)), int(base.get("y", 2)))
+            goal = (int(target.get("x")), int(target.get("y")))
+            path_cells = find_path(grid, start, goal)
+            if path_cells:
+                return build_route_from_path(
+                    path_cells,
+                    initial_heading=initial_heading,
+                    source="map",
+                )
+            raise ValueError(f"No valid mapped path found from base to room {room}.")
+
+    return fallback_route_for_room(room, initial_heading=initial_heading)
+
+
+def navigate_to_room(room, send_command, server_url=None, user_id=None, initial_heading=DEFAULT_HEADING):
+    print(f"Navigation started for room: {room}")
+    route = route_to_room(
+        room,
+        server_url=server_url,
+        user_id=user_id,
+        initial_heading=initial_heading,
+    )
+    print(f"Using {route['source']} route for {room}")
+    execute_commands(route["commands"], send_command)
     print("Reached destination")
-    return path
+    return route
+
+
+def return_to_base(route, send_command, current_heading, target_heading=DEFAULT_HEADING):
+    print("Returning to base...")
+
+    if route.get("path_cells"):
+        return_path = list(reversed(route["path_cells"]))
+        commands, heading_at_base = build_command_sequence(
+            return_path,
+            initial_heading=current_heading,
+        )
+    else:
+        commands = [
+            (reverse_command(command), duration)
+            for command, duration in reversed(route.get("commands") or [])
+        ]
+        heading_at_base = heading_after_commands(commands, initial_heading=current_heading)
+
+    execute_commands(commands, send_command)
+
+    alignment_commands = [
+        (turn, TURN_DURATION) for turn in turn_instructions(heading_at_base, target_heading)
+    ]
+    if alignment_commands:
+        print(f"Aligning at base to heading {target_heading}")
+        execute_commands(alignment_commands, send_command)
+        heading_at_base = target_heading
+
+    print("Returned to base")
+    return {
+        "commands": commands,
+        "alignment_commands": alignment_commands,
+        "final_heading": heading_at_base,
+    }

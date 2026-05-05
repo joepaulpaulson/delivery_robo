@@ -29,6 +29,7 @@ from flask_login import (
 )
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import google.generativeai as genai
@@ -1580,24 +1581,65 @@ def register():
         if not email:
             flash("Email is required.", "error")
             return redirect(url_for("register"))
-        if Account.query.filter_by(email=email).first():
-            flash("Email already exists", "error")
+        if not password:
+            flash("Password is required.", "error")
             return redirect(url_for("register"))
+        if Account.query.filter_by(email=email).first():
+            flash("Email already exists. Please log in instead.", "error")
+            return redirect(url_for("register"))
+
+        existing_user = User.query.filter_by(username=email).first()
+        password_hash = generate_password_hash(password, method="pbkdf2:sha256")
+
+        if existing_user:
+            recovered_account = Account.query.filter_by(
+                user_id=existing_user.id, role="ADMIN"
+            ).first()
+            if recovered_account:
+                recovered_account.email = email
+                recovered_account.password = existing_user.password
+                db.session.commit()
+                flash("Existing account found. Please log in.", "success")
+                return redirect(url_for("login"))
+
+            existing_user.password = password_hash
+            recovered_account = Account(
+                role="ADMIN",
+                email=email,
+                password=password_hash,
+                user_id=existing_user.id,
+            )
+            db.session.add(recovered_account)
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                flash("Email already exists. Please log in instead.", "error")
+                return redirect(url_for("login"))
+
+            login_user(recovered_account)
+            flash("Recovered your existing account.", "success")
+            return redirect(url_for("setup"))
 
         new_user = User(
             username=email,
-            password=generate_password_hash(password, method="pbkdf2:sha256"),
+            password=password_hash,
         )
         db.session.add(new_user)
-        db.session.flush()
-        new_account = Account(
-            role="ADMIN",
-            email=email,
-            password=new_user.password,
-            user_id=new_user.id,
-        )
-        db.session.add(new_account)
-        db.session.commit()
+        try:
+            db.session.flush()
+            new_account = Account(
+                role="ADMIN",
+                email=email,
+                password=new_user.password,
+                user_id=new_user.id,
+            )
+            db.session.add(new_account)
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash("Email already exists. Please log in instead.", "error")
+            return redirect(url_for("login"))
         login_user(new_account)
         return redirect(url_for("setup"))
 

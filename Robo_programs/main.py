@@ -7,21 +7,36 @@ import serial
 from gtts import gTTS
 
 from navigation import (
+    DEFAULT_HEADING,
     deserialize_path_cells,
+    execute_commands,
     execute_path_cells,
-    navigate_to_room,
+    route_to_room,
     return_to_base,
 )
 
 
-SERVER_URL = "http://192.168.18.62:5000"
-USER_ID = 1
-PORT_NAME = "/dev/ttyUSB0"
-POLL_INTERVAL_SECONDS = 3
+SERVER_URL = os.environ.get("ROBOT_SERVER_URL", "http://192.168.18.62:5000")
+USER_ID = int(os.environ.get("ROBOT_USER_ID", "1"))
+PORT_NAME = os.environ.get("ROBOT_PORT", "/dev/ttyUSB0")
+POLL_INTERVAL_SECONDS = int(os.environ.get("ROBOT_POLL_INTERVAL_SECONDS", "3"))
+SERIAL_BAUD_RATE = int(os.environ.get("ROBOT_SERIAL_BAUD", "9600"))
+COMMAND_SETTLE_SECONDS = float(os.environ.get("ROBOT_COMMAND_SETTLE_SECONDS", "0.35"))
+WAIT_HEARTBEAT_INTERVAL_SECONDS = float(
+    os.environ.get("ROBOT_WAIT_HEARTBEAT_INTERVAL_SECONDS", "1")
+)
+MEDICINE_DELIVERY_WAIT_SECONDS = int(
+    os.environ.get("ROBOT_MEDICINE_DELIVERY_WAIT_SECONDS", "20")
+)
+WATER_DELIVERY_WAIT_SECONDS = int(
+    os.environ.get("ROBOT_WATER_DELIVERY_WAIT_SECONDS", "10")
+)
+HELP_REQUEST_WAIT_SECONDS = int(os.environ.get("ROBOT_HELP_REQUEST_WAIT_SECONDS", "8"))
+SCHEDULE_STOP_WAIT_SECONDS = int(os.environ.get("ROBOT_SCHEDULE_STOP_WAIT_SECONDS", "18"))
 
 
 try:
-    arduino = serial.Serial(PORT_NAME, 9600, timeout=1)
+    arduino = serial.Serial(PORT_NAME, SERIAL_BAUD_RATE, timeout=1)
     time.sleep(2)
     arduino.reset_input_buffer()
     print(f"Real hardware connected: {PORT_NAME}")
@@ -40,12 +55,34 @@ def speak(text):
         print(f"Audio error: {error}")
 
 
-def send_command(command, duration):
-    print(f"Sending '{command}' for {duration} second(s)...")
+def read_controller_feedback(timeout_seconds=0.25):
+    deadline = time.time() + timeout_seconds
+    messages = []
+    while time.time() < deadline:
+        if arduino.in_waiting:
+            raw_line = arduino.readline().decode(errors="ignore").strip()
+            if raw_line:
+                messages.append(raw_line)
+        else:
+            time.sleep(0.02)
+    return messages
+
+
+def send_controller_signal(command):
     arduino.write(command.encode())
+    feedback = read_controller_feedback()
+    for message in feedback:
+        print(f"Controller: {message}")
+    return feedback
+
+
+def send_command(command, duration):
+    duration = max(float(duration), 0.0)
+    print(f"Sending '{command}' for {duration:.2f} second(s)...")
+    send_controller_signal(command)
     time.sleep(duration)
-    arduino.write(b"S")
-    time.sleep(0.5)
+    send_controller_signal("S")
+    time.sleep(COMMAND_SETTLE_SECONDS)
 
 
 def post_heartbeat(**payload):
@@ -57,6 +94,55 @@ def post_heartbeat(**payload):
         )
     except Exception as error:
         print(f"Heartbeat failed: {error}")
+
+
+def post_robot_state(
+    *,
+    current_task="Idle",
+    is_moving=False,
+    location="Dock",
+    drawer_open=False,
+    current_stop_index=0,
+    remaining_stops=0,
+    estimated_remaining_seconds=0,
+):
+    post_heartbeat(
+        current_task=current_task,
+        is_moving=is_moving,
+        location=location,
+        drawer_open=drawer_open,
+        current_stop_index=current_stop_index,
+        remaining_stops=remaining_stops,
+        estimated_remaining_seconds=max(int(estimated_remaining_seconds), 0),
+    )
+
+
+def wait_with_heartbeat(
+    wait_seconds,
+    *,
+    current_task,
+    location,
+    current_stop_index=0,
+    remaining_stops=0,
+    estimated_after_wait=0,
+):
+    wait_seconds = max(int(wait_seconds), 0)
+    deadline = time.time() + wait_seconds
+
+    while True:
+        remaining_wait = max(int(round(deadline - time.time())), 0)
+        post_robot_state(
+            current_task=current_task,
+            is_moving=False,
+            location=location,
+            drawer_open=False,
+            current_stop_index=current_stop_index,
+            remaining_stops=remaining_stops,
+            estimated_remaining_seconds=estimated_after_wait + remaining_wait,
+        )
+        if remaining_wait <= 0:
+            break
+        time.sleep(min(WAIT_HEARTBEAT_INTERVAL_SECONDS, remaining_wait))
 
 
 def post_mission_log(action, details):
@@ -110,6 +196,24 @@ def complete_medication(med_id, *, mission_active=False, details=None, location=
         print(f"Medication completion update failed: {error}")
 
 
+def route_duration_seconds(route):
+    return int(round(sum(duration for _, duration in route.get("commands") or [])))
+
+
+def signal_virtual_drawer(action, location, message):
+    action = action.lower().strip()
+    if action not in {"open", "close"}:
+        raise ValueError(f"Unsupported drawer action: {action}")
+
+    command = "O" if action == "open" else "C"
+    print(f"Drawer action ({action}) at {location}: {message}")
+    send_controller_signal(command)
+    post_mission_log(
+        "Robot Drawer Notice",
+        f"{action.title()} request at {location}: {message}",
+    )
+
+
 def execute_robot_command(command):
     print(f"Executing direct robot command: {command}")
 
@@ -122,92 +226,125 @@ def execute_robot_command(command):
     elif command == "right":
         send_command("R", 0.8)
     elif command == "open_drawer":
-        arduino.write(b"O")
+        signal_virtual_drawer("open", "Dock", "Manual drawer-open command received.")
     elif command == "close_drawer":
-        arduino.write(b"C")
+        signal_virtual_drawer("close", "Dock", "Manual drawer-close command received.")
     elif command == "emergency":
-        arduino.write(b"S")
+        send_controller_signal("S")
         speak("Emergency stop activated.")
     else:
-        arduino.write(b"S")
+        send_controller_signal("S")
 
-    post_heartbeat(
+    post_robot_state(
         current_task=f"Executed {command}",
-        is_moving=command in {"forward", "backward", "left", "right"},
-        drawer_open=command == "open_drawer",
+        is_moving=False,
         location="Dock",
-        current_stop_index=0,
-        remaining_stops=0,
-        estimated_remaining_seconds=0,
+        drawer_open=False,
     )
 
 
-def run_delivery_sequence(patient_name, item_name, dosage, room, *, drawer_message, wait_seconds=15):
+def run_delivery_sequence(
+    patient_name,
+    item_name,
+    dosage,
+    room,
+    *,
+    drawer_message,
+    wait_seconds,
+):
     print(f"Starting delivery: {item_name} for {patient_name} in room {room}")
-    post_heartbeat(
+    route = route_to_room(
+        room,
+        server_url=SERVER_URL,
+        user_id=USER_ID,
+        initial_heading=DEFAULT_HEADING,
+    )
+    outbound_seconds = route_duration_seconds(route)
+
+    post_robot_state(
         current_task=f"Delivering {item_name}",
         is_moving=True,
         location=f"En route to {room}",
-        current_stop_index=0,
-        remaining_stops=0,
-        estimated_remaining_seconds=0,
+        estimated_remaining_seconds=outbound_seconds + wait_seconds,
     )
-
     speak(f"Delivering {item_name} for {patient_name} to room {room}.")
-    path = navigate_to_room(room, send_command, SERVER_URL, USER_ID)
+    execute_commands(route["commands"], send_command)
 
-    post_heartbeat(
+    post_robot_state(
         current_task=f"At {room}",
         is_moving=False,
         location=room,
-        current_stop_index=0,
-        remaining_stops=0,
-        estimated_remaining_seconds=0,
+        estimated_remaining_seconds=wait_seconds,
     )
     speak(drawer_message)
-    arduino.write(b"O")
-    post_heartbeat(
-        drawer_open=True,
-        current_task=f"Serving {item_name}",
-        is_moving=False,
-        location=room,
-        current_stop_index=0,
-        remaining_stops=0,
-        estimated_remaining_seconds=0,
+    signal_virtual_drawer(
+        "open",
+        room,
+        f"{item_name.title()} ready for {patient_name}. Dosage/info: {dosage}.",
     )
 
-    print(f"Waiting {wait_seconds} seconds...")
-    time.sleep(wait_seconds)
+    print(f"Waiting {wait_seconds} seconds at room {room}...")
+    wait_with_heartbeat(
+        wait_seconds,
+        current_task=f"Serving {item_name}",
+        location=room,
+        estimated_after_wait=0,
+    )
 
-    arduino.write(b"C")
-    post_heartbeat(
-        drawer_open=False,
+    signal_virtual_drawer(
+        "close",
+        room,
+        f"Completed {item_name} stop for {patient_name}.",
+    )
+    post_robot_state(
         current_task="Returning to dock",
         is_moving=True,
         location=f"Leaving {room}",
-        current_stop_index=0,
-        remaining_stops=0,
-        estimated_remaining_seconds=0,
+        estimated_remaining_seconds=outbound_seconds,
     )
     speak("Task complete. Returning to the dock.")
-    return_to_base(path, send_command)
-    post_heartbeat(
-        current_task="Idle",
-        is_moving=False,
-        location="Dock",
-        drawer_open=False,
-        current_stop_index=0,
-        remaining_stops=0,
-        estimated_remaining_seconds=0,
+    return_to_base(
+        route,
+        send_command,
+        current_heading=route["final_heading"],
+        target_heading=DEFAULT_HEADING,
     )
+    post_robot_state()
 
 
-def remaining_batch_seconds(batch, next_stop_index):
+def remaining_batch_travel_seconds(batch, stop_zero_based):
     remaining = 0
-    for stop in (batch.get("stops") or [])[next_stop_index:]:
+    for stop in (batch.get("stops") or [])[stop_zero_based:]:
         remaining += int(stop.get("travel_seconds") or 0)
     remaining += int((batch.get("return_path") or {}).get("travel_seconds") or 0)
     return remaining
+
+
+def remaining_batch_service_seconds(stop_count):
+    return stop_count * SCHEDULE_STOP_WAIT_SECONDS
+
+
+def remaining_batch_before_departure(batch, stop_zero_based):
+    stops_left = len((batch.get("stops") or [])[stop_zero_based:])
+    return remaining_batch_travel_seconds(batch, stop_zero_based) + remaining_batch_service_seconds(
+        stops_left
+    )
+
+
+def remaining_batch_after_arrival(batch, stop_zero_based):
+    later_stops = len((batch.get("stops") or [])[stop_zero_based + 1 :])
+    return (
+        SCHEDULE_STOP_WAIT_SECONDS
+        + remaining_batch_travel_seconds(batch, stop_zero_based + 1)
+        + remaining_batch_service_seconds(later_stops)
+    )
+
+
+def remaining_batch_after_service(batch, next_stop_zero_based):
+    later_stops = len((batch.get("stops") or [])[next_stop_zero_based:])
+    return remaining_batch_travel_seconds(batch, next_stop_zero_based) + remaining_batch_service_seconds(
+        later_stops
+    )
 
 
 def fetch_due_batch():
@@ -226,20 +363,15 @@ def execute_scheduled_batch(batch):
                 f"{item.get('room')}: {item.get('reason')}" for item in unroutable_tasks[:3]
             )
             print(f"No executable batch route. {reasons}")
-            post_heartbeat(
-                current_task="Waiting for mapped route",
-                is_moving=False,
-                location="Dock",
-                current_stop_index=0,
-                remaining_stops=0,
-                estimated_remaining_seconds=0,
-            )
+            post_robot_state(current_task="Waiting for mapped route")
         return False
 
     batch_id = batch.get("batch_id", "batch")
     unroutable_tasks = batch.get("unroutable_tasks") or []
     if unroutable_tasks:
-        warning_rooms = ", ".join(sorted({item.get("room") for item in unroutable_tasks if item.get("room")}))
+        warning_rooms = ", ".join(
+            sorted({item.get("room") for item in unroutable_tasks if item.get("room")})
+        )
         post_mission_log(
             "Robot Mission Warning",
             f"Batch {batch_id} started with unroutable rooms excluded: {warning_rooms}.",
@@ -252,60 +384,71 @@ def execute_scheduled_batch(batch):
     )
     speak(f"Starting medication round with {total_stops} room stops.")
 
-    heading = "N"
-    post_heartbeat(
+    heading = DEFAULT_HEADING
+    post_robot_state(
         current_task=f"Medication batch {batch_id}",
         is_moving=False,
         location="Dock",
-        drawer_open=False,
-        current_stop_index=0,
         remaining_stops=total_stops,
-        estimated_remaining_seconds=int(batch.get("total_travel_seconds") or 0),
+        estimated_remaining_seconds=remaining_batch_before_departure(batch, 0),
     )
 
     for stop_index, stop in enumerate(stops, start=1):
+        stop_zero_based = stop_index - 1
         room = stop.get("room", "Unknown Room")
         deliveries = stop.get("patient_deliveries") or []
         travel_path = deserialize_path_cells(stop.get("path_cells"))
-        eta_seconds = remaining_batch_seconds(batch, stop_index - 1)
 
-        post_heartbeat(
+        if not travel_path:
+            raise ValueError(f"Batch stop {stop_index} for room {room} has no path cells.")
+
+        post_robot_state(
             current_task=f"Medication batch stop {stop_index}/{total_stops}",
             is_moving=True,
             location=f"En route to {room}",
-            drawer_open=False,
             current_stop_index=stop_index,
-            remaining_stops=total_stops - stop_index + 1,
-            estimated_remaining_seconds=eta_seconds,
+            remaining_stops=total_stops - stop_zero_based,
+            estimated_remaining_seconds=remaining_batch_before_departure(
+                batch,
+                stop_zero_based,
+            ),
         )
         speak(f"Heading to room {room}. Stop {stop_index} of {total_stops}.")
-        _, heading = execute_path_cells(travel_path, send_command, initial_heading=heading)
+        _, heading = execute_path_cells(
+            travel_path,
+            send_command,
+            initial_heading=heading,
+        )
 
-        post_heartbeat(
+        post_robot_state(
             current_task=f"Serving room {room}",
             is_moving=False,
             location=room,
-            drawer_open=False,
             current_stop_index=stop_index,
             remaining_stops=total_stops - stop_index,
-            estimated_remaining_seconds=remaining_batch_seconds(batch, stop_index),
+            estimated_remaining_seconds=remaining_batch_after_arrival(
+                batch,
+                stop_zero_based,
+            ),
         )
 
         patient_names = ", ".join(
             sorted({delivery.get("patient", "the patient") for delivery in deliveries})
         )
         speak(f"Arrived at room {room}. Delivering medication for {patient_names}.")
-        arduino.write(b"O")
-        post_heartbeat(
+        signal_virtual_drawer(
+            "open",
+            room,
+            f"Medication stop for {patient_names} in room {room}.",
+        )
+        wait_with_heartbeat(
+            SCHEDULE_STOP_WAIT_SECONDS,
             current_task=f"Serving room {room}",
-            is_moving=False,
             location=room,
-            drawer_open=True,
             current_stop_index=stop_index,
             remaining_stops=total_stops - stop_index,
-            estimated_remaining_seconds=remaining_batch_seconds(batch, stop_index),
+            estimated_after_wait=remaining_batch_after_service(batch, stop_index),
         )
-        time.sleep(18)
 
         for delivery in deliveries:
             details = (
@@ -321,41 +464,45 @@ def execute_scheduled_batch(batch):
             )
             post_mission_log("Robot Delivery Completed", details)
 
-        arduino.write(b"C")
-        post_heartbeat(
+        signal_virtual_drawer(
+            "close",
+            room,
+            f"Completed medication stop for room {room}.",
+        )
+        post_robot_state(
             current_task=f"Completed room {room}",
             is_moving=False,
             location=room,
-            drawer_open=False,
             current_stop_index=stop_index,
             remaining_stops=total_stops - stop_index,
-            estimated_remaining_seconds=remaining_batch_seconds(batch, stop_index),
+            estimated_remaining_seconds=remaining_batch_after_service(batch, stop_index),
         )
 
     return_path = deserialize_path_cells((batch.get("return_path") or {}).get("path_cells"))
     return_seconds = int((batch.get("return_path") or {}).get("travel_seconds") or 0)
     if return_path:
-        post_heartbeat(
+        post_robot_state(
             current_task="Returning to dock",
             is_moving=True,
             location="Returning to base",
-            drawer_open=False,
             current_stop_index=total_stops,
             remaining_stops=0,
             estimated_remaining_seconds=return_seconds,
         )
         speak("Medication round complete. Returning to the dock.")
-        _, heading = execute_path_cells(return_path, send_command, initial_heading=heading)
+        _, heading = execute_path_cells(
+            return_path,
+            send_command,
+            initial_heading=heading,
+        )
+        return_to_base(
+            {"path_cells": [(0, 0)], "commands": [], "final_heading": heading},
+            send_command,
+            current_heading=heading,
+            target_heading=DEFAULT_HEADING,
+        )
 
-    post_heartbeat(
-        current_task="Idle",
-        is_moving=False,
-        location="Dock",
-        drawer_open=False,
-        current_stop_index=0,
-        remaining_stops=0,
-        estimated_remaining_seconds=0,
-    )
+    post_robot_state()
     post_mission_log(
         "Robot Mission Completed",
         f"Batch {batch_id} completed after serving {total_stops} stops.",
@@ -377,18 +524,27 @@ def handle_robot_task(task):
 
         if task_type == "room_navigation":
             room = task.get("room") or payload.get("room_number") or "A-101"
-            post_heartbeat(current_task=f"Navigating to {room}", is_moving=True, location=f"En route to {room}")
-            path = navigate_to_room(room, send_command, SERVER_URL, USER_ID)
-            speak(f"Arrived at room {room}. Returning to dock.")
-            return_to_base(path, send_command)
-            post_heartbeat(
-                current_task="Idle",
-                is_moving=False,
-                location="Dock",
-                current_stop_index=0,
-                remaining_stops=0,
-                estimated_remaining_seconds=0,
+            route = route_to_room(
+                room,
+                server_url=SERVER_URL,
+                user_id=USER_ID,
+                initial_heading=DEFAULT_HEADING,
             )
+            post_robot_state(
+                current_task=f"Navigating to {room}",
+                is_moving=True,
+                location=f"En route to {room}",
+                estimated_remaining_seconds=route_duration_seconds(route),
+            )
+            execute_commands(route["commands"], send_command)
+            speak(f"Arrived at room {room}. Returning to dock.")
+            return_to_base(
+                route,
+                send_command,
+                current_heading=route["final_heading"],
+                target_heading=DEFAULT_HEADING,
+            )
+            post_robot_state()
             complete_robot_task(task_id, f"Navigation to {room} completed.")
             return
 
@@ -402,7 +558,7 @@ def handle_robot_task(task):
                 payload.get("dosage", "the scheduled dose"),
                 room,
                 drawer_message=f"Hello {patient}. Medication assistance has arrived in room {room}.",
-                wait_seconds=20,
+                wait_seconds=MEDICINE_DELIVERY_WAIT_SECONDS,
             )
             complete_robot_task(task_id, f"Medication request completed in room {room}.")
             return
@@ -414,27 +570,46 @@ def handle_robot_task(task):
                 "a glass of water",
                 room,
                 drawer_message=f"Hello {patient}. Water delivery has arrived in room {room}.",
-                wait_seconds=10,
+                wait_seconds=WATER_DELIVERY_WAIT_SECONDS,
             )
             complete_robot_task(task_id, f"Water request completed in room {room}.")
             return
 
         if task_type == "help_request":
-            post_heartbeat(current_task="Emergency assist", is_moving=True, location=f"En route to {room}")
-            speak(f"Emergency assist heading to room {room}.")
-            path = navigate_to_room(room, send_command, SERVER_URL, USER_ID)
-            post_heartbeat(current_task="Emergency assist on site", is_moving=False, location=room)
-            speak(f"Emergency assistance has arrived for {patient}. Caregiver has been notified.")
-            time.sleep(8)
-            return_to_base(path, send_command)
-            post_heartbeat(
-                current_task="Idle",
-                is_moving=False,
-                location="Dock",
-                current_stop_index=0,
-                remaining_stops=0,
-                estimated_remaining_seconds=0,
+            route = route_to_room(
+                room,
+                server_url=SERVER_URL,
+                user_id=USER_ID,
+                initial_heading=DEFAULT_HEADING,
             )
+            post_robot_state(
+                current_task="Emergency assist",
+                is_moving=True,
+                location=f"En route to {room}",
+                estimated_remaining_seconds=route_duration_seconds(route)
+                + HELP_REQUEST_WAIT_SECONDS,
+            )
+            speak(f"Emergency assist heading to room {room}.")
+            execute_commands(route["commands"], send_command)
+            post_robot_state(
+                current_task="Emergency assist on site",
+                is_moving=False,
+                location=room,
+                estimated_remaining_seconds=HELP_REQUEST_WAIT_SECONDS,
+            )
+            speak(f"Emergency assistance has arrived for {patient}. Caregiver has been notified.")
+            wait_with_heartbeat(
+                HELP_REQUEST_WAIT_SECONDS,
+                current_task="Emergency assist on site",
+                location=room,
+            )
+            return_to_base(
+                route,
+                send_command,
+                current_heading=route["final_heading"],
+                target_heading=DEFAULT_HEADING,
+            )
+            post_robot_state()
             complete_robot_task(task_id, f"Emergency assistance completed for room {room}.")
             return
 
@@ -452,7 +627,7 @@ def fetch_next_task():
 
 def main():
     speak("Jacob medical system online. Monitoring control center for requests.")
-    post_heartbeat(current_task="Idle", is_moving=False, location="Dock", drawer_open=False)
+    post_robot_state()
     print(f"System online. Monitoring {SERVER_URL}")
 
     while True:
@@ -467,15 +642,7 @@ def main():
                 if batch.get("stops"):
                     execute_scheduled_batch(batch)
                 else:
-                    post_heartbeat(
-                        current_task="Idle",
-                        is_moving=False,
-                        location="Dock",
-                        drawer_open=False,
-                        current_stop_index=0,
-                        remaining_stops=0,
-                        estimated_remaining_seconds=0,
-                    )
+                    post_robot_state()
                     if batch.get("due_task_count") and batch.get("unroutable_tasks"):
                         print("\nDue medicines found, but no valid mapped route is available yet.")
                     sys.stdout.write("\rWaiting for commands... ")

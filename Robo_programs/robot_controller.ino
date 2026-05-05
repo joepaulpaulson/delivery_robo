@@ -7,19 +7,12 @@
     L = turn left in place
     R = turn right in place
     S = stop motors immediately
-    O = open drawer
-    C = close drawer
+    O = log drawer-open request
+    C = log drawer-close request
 
-  Assumed hardware:
-    - Arduino Uno/Nano
-    - Dual DC motor driver (L298N/L293D-style wiring)
-    - One servo for the medicine drawer
-
-  Adjust the pin mapping, motor speeds, and drawer angles below to match
-  your chassis and driver wiring.
+  Drawer control is intentionally print-only for now so the robot can focus on
+  reliable movement, room visits, waits, and return-to-base behavior.
 */
-
-#include <Servo.h>
 
 namespace Pins {
 const uint8_t kLeftEnable = 5;   // PWM
@@ -30,7 +23,6 @@ const uint8_t kRightEnable = 6;  // PWM
 const uint8_t kRightIn1 = 10;
 const uint8_t kRightIn2 = 11;
 
-const uint8_t kDrawerServo = 9;
 const uint8_t kStatusLed = LED_BUILTIN;
 }  // namespace Pins
 
@@ -43,14 +35,6 @@ const uint8_t kTurnSpeed = 170;
 // stop byte is missed or the Pi process crashes mid-move.
 const unsigned long kCommandTimeoutMs = 15000UL;
 }  // namespace Motion
-
-namespace Drawer {
-const int kClosedAngle = 12;
-const int kOpenAngle = 95;
-const uint8_t kStepDelayMs = 12;
-}  // namespace Drawer
-
-Servo drawerServo;
 
 char activeCommand = 'S';
 unsigned long lastMotionCommandAt = 0;
@@ -107,31 +91,9 @@ void turnRight() {
   digitalWrite(Pins::kStatusLed, HIGH);
 }
 
-void moveDrawerTo(int targetAngle) {
-  int currentAngle = drawerServo.read();
-  if (currentAngle < 0 || currentAngle > 180) {
-    currentAngle = Drawer::kClosedAngle;
-  }
-
-  if (currentAngle == targetAngle) {
-    drawerServo.write(targetAngle);
-    return;
-  }
-
-  int step = currentAngle < targetAngle ? 1 : -1;
-  for (int angle = currentAngle; angle != targetAngle; angle += step) {
-    drawerServo.write(angle);
-    delay(Drawer::kStepDelayMs);
-  }
-  drawerServo.write(targetAngle);
-}
-
-void openDrawer() {
-  moveDrawerTo(Drawer::kOpenAngle);
-}
-
-void closeDrawer() {
-  moveDrawerTo(Drawer::kClosedAngle);
+void logDrawerAction(const __FlashStringHelper* action) {
+  Serial.print(F("DRAWER:"));
+  Serial.println(action);
 }
 
 void handleCommand(char command) {
@@ -157,11 +119,11 @@ void handleCommand(char command) {
       Serial.println(F("ACK:S"));
       break;
     case 'O':
-      openDrawer();
+      logDrawerAction(F("OPEN_REQUEST"));
       Serial.println(F("ACK:O"));
       break;
     case 'C':
-      closeDrawer();
+      logDrawerAction(F("CLOSE_REQUEST"));
       Serial.println(F("ACK:C"));
       break;
     default:
@@ -181,9 +143,6 @@ void setup() {
   pinMode(Pins::kStatusLed, OUTPUT);
 
   stopDrive();
-
-  drawerServo.attach(Pins::kDrawerServo);
-  closeDrawer();
 
   Serial.begin(9600);
   Serial.println(F("ROBOT_READY"));
