@@ -4,287 +4,458 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Patient Dashboard - Jacob AI</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
-        :root {
-            --bg: #060606;
-            --panel: rgba(22, 22, 24, 0.88);
-            --border: rgba(255, 255, 255, 0.08);
-            --muted: #9ca3af;
-            --accent: #38bdf8;
-            --success: #34d399;
-            --danger: #f87171;
-        }
-        body {
-            margin: 0;
-            min-height: 100vh;
-            background:
-                radial-gradient(circle at top, rgba(56, 189, 248, 0.14), transparent 35%),
-                linear-gradient(180deg, #050505 0%, #0d0d10 100%);
-            color: white;
-            font-family: 'Inter', sans-serif;
-        }
-        .shell {
-            max-width: 1080px;
-            margin: 0 auto;
-            padding: 28px 18px 40px;
-        }
-        .topbar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 22px;
-        }
-        .title h1 {
-            margin: 0;
-            font-size: 2rem;
-        }
-        .title p {
-            margin: 6px 0 0;
-            color: var(--muted);
-        }
-        .topbar a {
-            color: white;
-            text-decoration: none;
-            border: 1px solid var(--border);
-            padding: 12px 16px;
-            border-radius: 999px;
-            background: rgba(255, 255, 255, 0.05);
-        }
-        .hero {
-            display: grid;
-            grid-template-columns: 1.3fr 0.9fr;
-            gap: 18px;
-            margin-bottom: 18px;
-        }
-        .panel {
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: 24px;
-            padding: 22px;
-            box-sizing: border-box;
-        }
-        .panel h2 {
-            margin: 0 0 12px;
-            font-size: 1.1rem;
-        }
-        .meta {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 12px;
-        }
-        .meta-card {
-            background: rgba(255, 255, 255, 0.04);
-            border-radius: 18px;
-            padding: 14px;
-        }
-        .meta-card span {
-            display: block;
-            color: var(--muted);
-            font-size: 0.78rem;
-            margin-bottom: 6px;
-        }
-        .action-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 12px;
-        }
-        .action-grid button {
-            border: none;
-            border-radius: 18px;
-            padding: 18px;
-            font-size: 1rem;
-            font-weight: 700;
-            color: white;
-            cursor: pointer;
-            background: rgba(255, 255, 255, 0.08);
-        }
-        .action-grid .danger {
-            background: rgba(248, 113, 113, 0.18);
-            color: #fecaca;
-        }
-        .action-grid .accent {
-            background: rgba(56, 189, 248, 0.18);
-        }
-        .status-line {
-            margin-top: 14px;
-            padding: 12px 14px;
-            border-radius: 14px;
-            background: rgba(255, 255, 255, 0.05);
-            color: var(--muted);
-        }
-        .grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 18px;
-        }
-        textarea,
-        input {
-            width: 100%;
-            box-sizing: border-box;
-            border: 1px solid var(--border);
-            background: rgba(255, 255, 255, 0.04);
-            color: white;
-            border-radius: 16px;
-            padding: 14px;
-            font-family: inherit;
-            font-size: 0.95rem;
-        }
-        .stack {
+        .ai-chat-display {
+            height: 220px;
+            overflow-y: auto;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 12px;
+            margin-bottom: 15px;
             display: flex;
             flex-direction: column;
             gap: 10px;
         }
-        .stack button,
-        .voice-bar button {
-            border: none;
-            border-radius: 16px;
-            padding: 14px 16px;
-            font-weight: 700;
-            cursor: pointer;
-            background: white;
-            color: black;
+
+        .ai-message {
+            padding: 8px 12px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            max-width: 85%;
+            line-height: 1.4;
         }
-        .voice-bar {
-            display: flex;
-            gap: 10px;
-            align-items: center;
+
+        .ai-message.bot {
+            background: rgba(255, 255, 255, 0.1);
+            color: #e2e2e7;
+            align-self: flex-start;
+            border-bottom-left-radius: 2px;
         }
-        .list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
+
+        .ai-message.user {
+            background: #0a84ff;
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 2px;
         }
-        .request-item,
-        .history-item {
-            background: rgba(255, 255, 255, 0.04);
-            border-radius: 16px;
-            padding: 14px;
-        }
-        .request-item strong,
-        .history-item strong {
-            display: block;
-            margin-bottom: 4px;
-        }
-        .muted {
-            color: var(--muted);
-            font-size: 0.86rem;
-        }
-        .link-row {
-            margin-top: 14px;
-        }
-        .link-row a {
-            color: var(--accent);
-            text-decoration: none;
+
+        .ai-message.emergency {
+            background: rgba(255, 69, 58, 0.2);
+            border: 1px solid #ff453a;
+            color: #ff453a;
             font-weight: 600;
         }
-        @media (max-width: 860px) {
-            .hero,
-            .grid {
+
+        .ai-input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .btn-send-icon {
+            position: absolute;
+            right: 10px;
+            background: none;
+            border: none;
+            color: #0a84ff;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+        }
+
+        .ai-status-text {
+            font-size: 0.75rem;
+            color: #8e8e93;
+            margin-top: 8px;
+            text-align: center;
+        }
+
+        .patient-header-copy {
+            color: #8e8e93;
+            font-size: 0.86rem;
+            line-height: 1.5;
+        }
+
+        .patient-profile-grid,
+        .request-status-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .summary-card,
+        .history-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 18px;
+            padding: 14px;
+        }
+
+        .summary-card span,
+        .history-meta {
+            color: #8e8e93;
+            font-size: 0.78rem;
+        }
+
+        .summary-card strong {
+            display: block;
+            margin-top: 6px;
+            font-size: 1rem;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 84px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            font-size: 0.76rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .status-badge.completed {
+            background: rgba(48, 209, 88, 0.16);
+            color: #7bf1a7;
+        }
+
+        .status-badge.pending {
+            background: rgba(255, 159, 10, 0.16);
+            color: #ffd18a;
+        }
+
+        .status-badge.upcoming {
+            background: rgba(10, 132, 255, 0.16);
+            color: #89c7ff;
+        }
+
+        .schedule-copy,
+        .request-copy,
+        .history-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+
+        .schedule-copy strong,
+        .request-copy strong,
+        .history-card strong {
+            font-size: 0.96rem;
+        }
+
+        .request-status-grid {
+            margin-bottom: 14px;
+        }
+
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow-y: auto;
+        }
+
+        .history-card {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .symptom-chip-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .symptom-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 7px 11px;
+            border-radius: 999px;
+            background: rgba(94, 92, 230, 0.18);
+            color: #d8d7ff;
+            font-size: 0.78rem;
+            font-weight: 600;
+        }
+
+        .panel-link {
+            margin-top: 14px;
+            color: #89c7ff;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.88rem;
+        }
+
+        @media (max-width: 560px) {
+            .patient-profile-grid,
+            .request-status-grid {
                 grid-template-columns: 1fr;
             }
         }
     </style>
 </head>
 <body>
-    <div class="shell">
-        <div class="topbar">
-            <div class="title">
-                <h1>Patient Dashboard</h1>
-                <p>Welcome, {{ patient.name }}. Your caretaker can see the same request and progress timeline.</p>
-            </div>
-            <a href="/logout">Logout</a>
-        </div>
+    <div class="bg-glow"></div>
 
-        <div class="hero">
-            <div class="panel">
-                <h2>Quick Requests</h2>
-                <div class="action-grid">
-                    <button class="accent" onclick="sendPatientRequest('water')">Request Water</button>
-                    <button class="accent" onclick="sendPatientRequest('medicine')">Request Medicine</button>
-                    <button class="danger" onclick="sendPatientRequest('help')">SOS Emergency</button>
-                    <button onclick="submitManualPatientCommand()">Send Manual Request</button>
-                </div>
-                <div id="patientStatus" class="status-line">Status: Ready</div>
+    <div class="navbar-container">
+        <nav class="navbar">
+            <div class="navbar-header">
+                <a href="/patient/dashboard" class="navbar-title">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                    </svg>
+                    Jacob Patient Portal
+                </a>
+
+                <button class="menu-toggle">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="3" y1="12" x2="21" y2="12"></line>
+                        <line x1="3" y1="6" x2="21" y2="6"></line>
+                        <line x1="3" y1="18" x2="21" y2="18"></line>
+                    </svg>
+                </button>
             </div>
 
-            <div class="panel">
-                <h2>My Profile</h2>
-                <div class="meta">
-                    <div class="meta-card">
-                        <span>Room</span>
-                        <strong>{{ patient.room_number }}</strong>
-                    </div>
-                    <div class="meta-card">
-                        <span>Age</span>
-                        <strong>{{ patient.age or 'Not Set' }}</strong>
-                    </div>
-                    <div class="meta-card">
-                        <span>Gender</span>
-                        <strong>{{ patient.gender or 'Not Set' }}</strong>
-                    </div>
+            <div class="navbar-links">
+                <a href="/patient/dashboard" class="active">Dashboard</a>
+                <a href="/patient/history">My History</a>
+                <a href="/logout">Logout</a>
+            </div>
+        </nav>
+    </div>
+
+    <div class="dashboard-grid">
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-icon-bg icon-blue">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
                 </div>
-                {% if patient.emergency_notes %}
-                <div class="status-line" style="margin-top: 12px;">
-                    <strong>Emergency Notes</strong><br>
-                    {{ patient.emergency_notes }}
-                </div>
-                {% endif %}
+                <div class="panel-title">Live Digital Twin</div>
+            </div>
+            <div id="canvas-container">
+                <div class="interaction-hint">Swipe to Rotate</div>
             </div>
         </div>
 
-        <div class="grid">
-            <div class="panel">
-                <h2>Voice and Manual Requests</h2>
-                <div class="voice-bar">
-                    <button type="button" id="voiceBtn">Tap to Speak</button>
-                    <span id="voiceHint" class="muted">Say water, medicine, SOS, or return robot.</span>
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-icon-bg icon-green">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
                 </div>
-                <div class="stack" style="margin-top: 14px;">
-                    <textarea id="manualCommandInput" rows="4" placeholder="Example: bring medicine or return robot"></textarea>
-                    <button type="button" onclick="submitManualPatientCommand()">Send Request</button>
+                <div class="panel-title">Today's Medications</div>
+            </div>
+
+            <div class="patient-header-copy" style="margin-bottom: 16px;">
+                This view only shows {{ patient.name }}'s medication schedule for today.
+            </div>
+
+            <div class="schedule-container">
+                {% for item in medication_schedule %}
+                <div class="schedule-item">
+                    <div class="schedule-copy">
+                        <strong>{{ item.task }}</strong>
+                        <span class="history-meta">{{ item.time }}{% if item.dosage %} · {{ item.dosage }}{% endif %}</span>
+                        <span class="history-meta">{{ item.notes or 'No extra instructions.' }}</span>
+                    </div>
+                    <span class="status-badge {{ item.status }}">{{ item.status }}</span>
+                </div>
+                {% else %}
+                <div class="summary-card">
+                    <strong>No medications scheduled today.</strong>
+                    <div class="history-meta">When your caretaker assigns medicines, they will appear here.</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-icon-bg icon-orange">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                </div>
+                <div class="panel-title">Actions & Voice</div>
+            </div>
+
+            <div class="action-panel-content">
+                <div class="request-grid-3">
+                    <button onclick="sendPatientRequest('medicine')" class="btn-tile">
+                        <svg class="c-blue" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.5 20.5l10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7z"></path><line x1="8.5" y1="8.5" x2="15.5" y2="15.5"></line></svg>
+                        Medicine
+                    </button>
+                    <button onclick="sendPatientRequest('water')" class="btn-tile">
+                        <svg class="c-cyan" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path></svg>
+                        Water
+                    </button>
+                    <button onclick="sendPatientRequest('help')" class="btn-tile btn-emergency-tile">
+                        <svg class="c-red" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                        SOS
+                    </button>
+                </div>
+
+                <div class="voice-full-width">
+                    <div class="mic-circle" id="voiceBtn">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                    </div>
+                    <div id="voiceMessage" class="voice-message-box">Ready</div>
+                    <div id="voiceSubtext" class="voice-subtext">Tap to Speak</div>
+                </div>
+
+                <div id="patientStatus" class="summary-card" style="margin-top: 6px;">Status: Ready</div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-icon-bg icon-purple" style="background: rgba(168, 85, 247, 0.2); color: #a855f7;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                </div>
+                <div class="panel-title">AI Diagnostic Agent</div>
+            </div>
+
+            <div class="ai-chat-container">
+                <div id="aiChatHistory" class="ai-chat-display">
+                    <div class="ai-message bot">
+                        Hello {{ patient.name }}. Tell me how you feel and I will review your symptoms before sharing guidance.
+                    </div>
+                </div>
+
+                <div class="ai-input-wrapper">
+                    <input type="text" id="symptomInput" class="clean-input" placeholder="Enter symptoms..." style="margin-bottom: 0;">
+                    <button class="btn-send-icon" type="button" onclick="submitPatientSymptomCheck()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                    </button>
+                </div>
+
+                <div id="aiLoadingIndicator" class="ai-status-text" style="display: none;">
+                    <div class="dots-stream"></div> Analyzing medical data...
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-icon-bg icon-blue" style="background: rgba(14, 165, 233, 0.2); color: #0ea5e9;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M4 12h16"></path>
+                        <path d="M4 6h16"></path>
+                        <path d="M4 18h10"></path>
+                    </svg>
+                </div>
+                <div class="panel-title">Request Status</div>
+            </div>
+
+            <div class="request-status-grid">
+                <div class="summary-card">
+                    <span>Queued</span>
+                    <strong>{{ stats.requests.queued }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Completed</span>
+                    <strong>{{ stats.requests.completed }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Room</span>
+                    <strong>{{ patient.room_number }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Adherence</span>
+                    <strong>{{ stats.score }}%</strong>
                 </div>
             </div>
 
-            <div class="panel">
-                <h2>AI Symptom Checker</h2>
-                <div class="stack">
-                    <input type="text" id="symptomInput" placeholder="Describe your symptoms or pain">
-                    <button type="button" onclick="submitPatientSymptomCheck()">Analyze Symptoms</button>
-                    <div id="symptomResponse" class="status-line">The AI symptom checker is ready.</div>
-                </div>
-            </div>
-
-            <div class="panel">
-                <h2>Recent Requests</h2>
-                <div id="patientRequestList" class="list">
-                    {% for item in recent_requests %}
-                    <div class="request-item">
+            <div id="patientRequestList" class="history-list">
+                {% for item in recent_requests %}
+                <div class="history-card">
+                    <div class="request-copy">
                         <strong>{{ item.label }}</strong>
-                        <div class="muted">{{ item.status }}{% if item.message %} · {{ item.message }}{% endif %}</div>
+                        <span class="history-meta">{{ item.status }}{% if item.message %} · {{ item.message }}{% endif %}</span>
                     </div>
-                    {% else %}
-                    <div class="request-item"><strong>No requests yet</strong><div class="muted">Your water, medicine, and SOS requests will appear here.</div></div>
-                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="summary-card">
+                    <strong>No requests yet.</strong>
+                    <div class="history-meta">Your water, medicine, and SOS requests will appear here.</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-icon-bg icon-red">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                </div>
+                <div class="panel-title">Patient History</div>
+            </div>
+
+            <div class="patient-profile-grid" style="margin-bottom: 14px;">
+                <div class="summary-card">
+                    <span>Patient</span>
+                    <strong>{{ patient.name }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Gender</span>
+                    <strong>{{ patient.gender or 'Not Set' }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Age</span>
+                    <strong>{{ patient.age or 'Not Set' }}</strong>
+                </div>
+                <div class="summary-card">
+                    <span>Taken Today</span>
+                    <strong>{{ stats.taken }} / {{ stats.total }}</strong>
                 </div>
             </div>
 
-            <div class="panel">
-                <h2>History Preview</h2>
-                <div class="list">
-                    {% for entry in history_preview %}
-                    <div class="history-item">
-                        <strong>{{ entry.title }}</strong>
-                        <div class="muted">{{ entry.details or 'No extra details.' }}</div>
-                    </div>
-                    {% else %}
-                    <div class="history-item"><strong>No history yet</strong><div class="muted">Medicine events and caretaker notes will appear here.</div></div>
-                    {% endfor %}
-                </div>
-                <div class="link-row"><a href="/patient/history">Open Full History</a></div>
+            {% if patient.emergency_notes %}
+            <div class="summary-card" style="margin-bottom: 14px;">
+                <span>Emergency Notes</span>
+                <strong style="font-size: 0.92rem; margin-top: 8px;">{{ patient.emergency_notes }}</strong>
             </div>
+            {% endif %}
+
+            <div class="history-list">
+                {% for entry in history_preview %}
+                <div class="history-card">
+                    <strong>{{ entry.title }}</strong>
+                    <div>{{ entry.details or 'No extra details.' }}</div>
+                    {% if entry.symptom_tags %}
+                    <div class="symptom-chip-list">
+                        {% for symptom in entry.symptom_tags %}
+                        <span class="symptom-chip">{{ symptom }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    <div class="history-meta">{{ entry.created_at_label }}</div>
+                </div>
+                {% else %}
+                <div class="summary-card">
+                    <strong>No history yet.</strong>
+                    <div class="history-meta">Medicine events and caretaker notes will appear here.</div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <a href="/patient/history" class="panel-link">Open Full History</a>
         </div>
+    </div>
+
+    <div class="carousel-nav">
+        <div class="nav-dot active"></div>
+        <div class="nav-dot"></div>
+        <div class="nav-dot"></div>
+        <div class="nav-dot"></div>
+        <div class="nav-dot"></div>
+        <div class="nav-dot"></div>
     </div>
 
     <script src="{{ url_for('static', filename='js/patient.js') }}"></script>

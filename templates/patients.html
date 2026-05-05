@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patients - Jacob Control Center</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at top, rgba(14, 165, 233, 0.12), transparent 30%),
+                linear-gradient(180deg, #050505 0%, #101014 100%);
+            color: white;
+            font-family: 'Inter', sans-serif;
+        }
+        .shell {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 28px 18px 40px;
+        }
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .topbar h1 {
+            margin: 0;
+            font-size: 2rem;
+        }
+        .topbar p {
+            margin: 6px 0 0;
+            color: #9ca3af;
+            max-width: 640px;
+        }
+        .nav {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .nav a,
+        .toolbar button {
+            color: white;
+            text-decoration: none;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 12px 16px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.05);
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.95rem;
+        }
+        .flash {
+            margin-bottom: 18px;
+            padding: 14px 16px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .workspace {
+            display: grid;
+            grid-template-columns: 320px minmax(0, 1fr);
+            gap: 18px;
+            align-items: start;
+        }
+        .panel {
+            background: rgba(21, 21, 24, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 24px;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .panel h2,
+        .panel h3 {
+            margin-top: 0;
+        }
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .search {
+            width: 100%;
+            box-sizing: border-box;
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.04);
+            color: white;
+            padding: 14px 16px;
+            margin-bottom: 14px;
+            font-family: inherit;
+        }
+        .patient-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 72vh;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+        .patient-list button {
+            width: 100%;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.04);
+            color: white;
+            border-radius: 18px;
+            padding: 16px;
+            text-align: left;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .patient-list button.active {
+            background: rgba(14, 165, 233, 0.18);
+            border-color: rgba(56, 189, 248, 0.45);
+            box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.15) inset;
+        }
+        .patient-list strong {
+            display: block;
+            font-size: 1rem;
+            margin-bottom: 4px;
+        }
+        .muted {
+            color: #9ca3af;
+            font-size: 0.86rem;
+        }
+        .detail-pane {
+            display: none;
+        }
+        .detail-pane.active {
+            display: block;
+        }
+        .detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            margin-bottom: 18px;
+        }
+        .detail-header h2 {
+            margin-bottom: 8px;
+        }
+        .pill-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.82rem;
+            color: #cbd5e1;
+            padding: 7px 10px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .danger-form button {
+            border: none;
+            border-radius: 999px;
+            padding: 12px 16px;
+            font-weight: 700;
+            cursor: pointer;
+            background: rgba(248, 113, 113, 0.18);
+            color: #fecaca;
+        }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 18px;
+        }
+        .tab-btn {
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.04);
+            color: #cbd5e1;
+            border-radius: 999px;
+            padding: 10px 14px;
+            cursor: pointer;
+            font-weight: 600;
+            font-family: inherit;
+        }
+        .tab-btn.active {
+            background: white;
+            color: black;
+        }
+        .tab-panel {
+            display: none;
+        }
+        .tab-panel.active {
+            display: block;
+        }
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+        }
+        label {
+            display: block;
+            font-size: 0.78rem;
+            color: #9ca3af;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        input, textarea {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+            color: white;
+            border-radius: 14px;
+            padding: 12px 14px;
+            font-family: inherit;
+            font-size: 0.94rem;
+        }
+        textarea {
+            min-height: 110px;
+            resize: vertical;
+        }
+        .symptom-builder {
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 12px;
+        }
+        .symptom-chip-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 10px;
+            min-height: 16px;
+        }
+        .symptom-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(56, 189, 248, 0.18);
+            color: #d7f1ff;
+            font-size: 0.86rem;
+        }
+        .symptom-chip button {
+            border: none;
+            background: transparent;
+            color: inherit;
+            padding: 0;
+            font-size: 0.95rem;
+            cursor: pointer;
+        }
+        .symptom-entry-row {
+            display: flex;
+            gap: 10px;
+        }
+        .symptom-entry-row input {
+            margin: 0;
+        }
+        .symptom-entry-row button {
+            border: none;
+            border-radius: 14px;
+            padding: 12px 14px;
+            font-weight: 700;
+            cursor: pointer;
+            background: white;
+            color: black;
+            white-space: nowrap;
+        }
+        .actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 14px;
+        }
+        .primary {
+            border: none;
+            border-radius: 999px;
+            padding: 12px 16px;
+            font-weight: 700;
+            cursor: pointer;
+            background: white;
+            color: black;
+        }
+        .list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .item {
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 14px;
+        }
+        .item strong {
+            display: block;
+            margin-bottom: 4px;
+        }
+        .empty-panel {
+            text-align: center;
+            padding: 48px 24px;
+        }
+        .create-drawer {
+            display: none;
+            margin-bottom: 18px;
+        }
+        .create-drawer.open {
+            display: block;
+        }
+        @media (max-width: 1040px) {
+            .workspace {
+                grid-template-columns: 1fr;
+            }
+            .patient-list {
+                max-height: none;
+            }
+        }
+        @media (max-width: 720px) {
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+            .detail-header {
+                flex-direction: column;
+            }
+            .topbar {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <div class="topbar">
+            <div>
+                <h1>Patient Management</h1>
+                <p>Choose a patient from the list, then switch between details, caretaker notes, medications, and shared history without scrolling through one long page.</p>
+            </div>
+            <div class="nav">
+                <a href="/dashboard">Dashboard</a>
+                <a href="/logs">Inventory</a>
+                <a href="/map">Map</a>
+                <a href="/history">History</a>
+                <a href="/logout">Logout</a>
+            </div>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="flash">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="create-drawer panel" id="createDrawer">
+            <h2>Add Patient</h2>
+            <form method="POST" action="/patients/create">
+                <div class="form-grid">
+                    <div><label>Name</label><input type="text" name="name" required></div>
+                    <div><label>Age</label><input type="number" name="age"></div>
+                    <div><label>Gender</label><input type="text" name="gender" placeholder="Male / Female / Other"></div>
+                    <div><label>Room Number</label><input type="text" name="room_number" placeholder="A-101" required></div>
+                    <div><label>Patient Username</label><input type="text" name="patient_username" placeholder="patient.john"></div>
+                    <div><label>Patient Password</label><input type="password" name="patient_password" placeholder="Create password"></div>
+                </div>
+                <div style="margin-top: 12px;">
+                    <label>Emergency Notes</label>
+                    <textarea name="emergency_notes" placeholder="Allergies, alerts, or special instructions"></textarea>
+                </div>
+                <div class="actions">
+                    <button type="submit" class="primary">Create Patient</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="workspace">
+            <div class="panel">
+                <div class="toolbar">
+                    <h2 style="margin:0;">Patients</h2>
+                    <button type="button" id="toggleCreateBtn">Add Patient</button>
+                </div>
+                <input type="text" class="search" id="patientSearch" placeholder="Search patient names">
+
+                <div class="patient-list" id="patientList">
+                    {% for patient in patients %}
+                    <button
+                        type="button"
+                        class="patient-selector"
+                        data-patient-target="patient-{{ patient.id }}"
+                        data-patient-name="{{ patient.name|lower }}"
+                    >
+                        <strong>{{ patient.name }}</strong>
+                        <div class="muted">Room {{ patient.room_number }}</div>
+                        <div class="muted">Login: {{ patient.account.username if patient.account else 'Not Set' }}</div>
+                    </button>
+                    {% else %}
+                    <div class="item">
+                        <strong>No patients yet</strong>
+                        <div class="muted">Create the first patient with the Add Patient button.</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div>
+                {% for patient in patients %}
+                <div class="panel detail-pane" id="patient-{{ patient.id }}">
+                    <div class="detail-header">
+                        <div>
+                            <h2>{{ patient.name }}</h2>
+                            <div class="pill-row">
+                                <span class="pill">Room {{ patient.room_number }}</span>
+                                <span class="pill">Age {{ patient.age or 'Not Set' }}</span>
+                                <span class="pill">{{ patient.gender or 'Gender Not Set' }}</span>
+                                <span class="pill">Login {{ patient.account.username if patient.account else 'Not Set' }}</span>
+                            </div>
+                        </div>
+                        <form
+                            method="POST"
+                            action="/patients/{{ patient.id }}/delete"
+                            class="danger-form"
+                            onsubmit="return confirm('Delete this patient and all linked medicines, requests, and history?');"
+                        >
+                            <button type="submit">Delete Patient</button>
+                        </form>
+                    </div>
+
+                    <div class="tabs">
+                        <button type="button" class="tab-btn" data-tab-target="details-{{ patient.id }}">Patient Details</button>
+                        <button type="button" class="tab-btn" data-tab-target="notes-{{ patient.id }}">Caretaker Notes</button>
+                        <button type="button" class="tab-btn" data-tab-target="medications-{{ patient.id }}">Medications</button>
+                        <button type="button" class="tab-btn" data-tab-target="history-{{ patient.id }}">Shared History</button>
+                    </div>
+
+                    <div class="tab-panel" id="details-{{ patient.id }}">
+                        <form method="POST" action="/patients/{{ patient.id }}/update">
+                            <div class="form-grid">
+                                <div><label>Name</label><input type="text" name="name" value="{{ patient.name }}" required></div>
+                                <div><label>Age</label><input type="number" name="age" value="{{ patient.age or '' }}"></div>
+                                <div><label>Gender</label><input type="text" name="gender" value="{{ patient.gender or '' }}"></div>
+                                <div><label>Room Number</label><input type="text" name="room_number" value="{{ patient.room_number }}" required></div>
+                                <div><label>Patient Username</label><input type="text" name="patient_username" value="{{ patient.account.username if patient.account else '' }}"></div>
+                                <div><label>Reset Password</label><input type="password" name="patient_password" placeholder="Leave blank to keep current"></div>
+                            </div>
+                            <div style="margin-top: 12px;">
+                                <label>Emergency Notes</label>
+                                <textarea name="emergency_notes">{{ patient.emergency_notes or '' }}</textarea>
+                            </div>
+                            <div class="actions">
+                                <button type="submit" class="primary">Save Patient Details</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="tab-panel" id="notes-{{ patient.id }}">
+                        <form method="POST" action="/patients/{{ patient.id }}/history-note" class="caretaker-note-form">
+                            <div>
+                                <label>Symptoms</label>
+                                <div class="symptom-builder" data-symptom-builder>
+                                    <div class="symptom-chip-list" data-symptom-list></div>
+                                    <div class="symptom-entry-row">
+                                        <input type="text" data-symptom-input placeholder="Type a symptom and press Add">
+                                        <button type="button" data-add-symptom>Add</button>
+                                    </div>
+                                    <input type="hidden" name="symptom_name" data-symptom-hidden>
+                                </div>
+                            </div>
+                            <div style="margin-top: 12px;">
+                                <label>Notes</label>
+                                <textarea name="details" placeholder="Example: soreness reduced after rest, patient feels better than this morning, pain is lower after medication."></textarea>
+                            </div>
+                            <div class="actions">
+                                <button type="submit" class="primary">Add Caretaker Note</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="tab-panel" id="medications-{{ patient.id }}">
+                        <form method="POST" action="/patients/{{ patient.id }}/medications/add">
+                            <div class="form-grid">
+                                <div><label>Medicine Name</label><input type="text" name="name" placeholder="Metformin" required></div>
+                                <div><label>Dosage</label><input type="text" name="dosage" placeholder="500mg"></div>
+                                <div><label>Time</label><input type="time" name="time" value="09:00" required></div>
+                                <div><label>Stock</label><input type="number" name="stock" value="30" min="0"></div>
+                                <div style="grid-column: 1 / -1;"><label>Instructions</label><input type="text" name="instructions" placeholder="After Food / Before Sleep / Manual Add"></div>
+                            </div>
+                            <div class="actions">
+                                <button type="submit" class="primary">Add Medication</button>
+                            </div>
+                        </form>
+
+                        <div style="height: 18px;"></div>
+                        <div class="list">
+                            {% for med in patient.medications %}
+                            <div class="item">
+                                <strong>{{ med.name }}</strong>
+                                <div class="muted">{{ med.dosage or 'Dose not set' }} · {{ med.schedule_time }} · Stock {{ med.stock }}</div>
+                                <div class="muted" style="margin-top: 6px;">{{ med.instructions or 'No instructions added.' }}</div>
+                            </div>
+                            {% else %}
+                            <div class="item">
+                                <strong>No medicines assigned yet</strong>
+                                <div class="muted">Use the dashboard scheduling tools or setup flow to add medicines for this patient.</div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="tab-panel" id="history-{{ patient.id }}">
+                        <div class="list">
+                            {% for entry in recent_history[patient.id] %}
+                            <div class="item">
+                                <strong>{{ entry.title }}</strong>
+                                <div class="muted">{{ entry.details or 'No extra details.' }}</div>
+                                {% if entry.symptom_tags %}
+                                <div class="symptom-chip-list" style="margin-top: 8px; margin-bottom: 0;">
+                                    {% for symptom in entry.symptom_tags %}
+                                    <span class="symptom-chip">{{ symptom }}</span>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+                                <div class="muted" style="margin-top: 6px;">{{ entry.created_at_label }}</div>
+                            </div>
+                            {% else %}
+                            <div class="item">
+                                <strong>No shared history yet</strong>
+                                <div class="muted">Medicine events and caretaker progress notes will show up here.</div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="panel empty-panel">
+                    <h2>No patients yet</h2>
+                    <p class="muted">Create the first patient with the Add Patient button to start managing details, notes, and medications.</p>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const createDrawer = document.getElementById('createDrawer');
+        const toggleCreateBtn = document.getElementById('toggleCreateBtn');
+        const searchInput = document.getElementById('patientSearch');
+        const patientButtons = Array.from(document.querySelectorAll('.patient-selector'));
+        const detailPanes = Array.from(document.querySelectorAll('.detail-pane'));
+
+        if (toggleCreateBtn && createDrawer) {
+            toggleCreateBtn.addEventListener('click', () => {
+                createDrawer.classList.toggle('open');
+            });
+        }
+
+        function activatePatient(targetId) {
+            patientButtons.forEach((button) => {
+                button.classList.toggle('active', button.dataset.patientTarget === targetId);
+            });
+            detailPanes.forEach((pane) => {
+                pane.classList.toggle('active', pane.id === targetId);
+            });
+        }
+
+        function activateTab(pane, targetId) {
+            const buttons = pane.querySelectorAll('.tab-btn');
+            const panels = pane.querySelectorAll('.tab-panel');
+            buttons.forEach((button) => {
+                button.classList.toggle('active', button.dataset.tabTarget === targetId);
+            });
+            panels.forEach((panel) => {
+                panel.classList.toggle('active', panel.id === targetId);
+            });
+        }
+
+        patientButtons.forEach((button) => {
+            button.addEventListener('click', () => {
+                activatePatient(button.dataset.patientTarget);
+            });
+        });
+
+        detailPanes.forEach((pane) => {
+            const tabButtons = pane.querySelectorAll('.tab-btn');
+            tabButtons.forEach((button) => {
+                button.addEventListener('click', () => {
+                    activateTab(pane, button.dataset.tabTarget);
+                });
+            });
+            if (tabButtons.length) {
+                activateTab(pane, tabButtons[0].dataset.tabTarget);
+            }
+        });
+
+        if (patientButtons.length) {
+            activatePatient(patientButtons[0].dataset.patientTarget);
+        }
+
+        if (searchInput) {
+            searchInput.addEventListener('input', () => {
+                const query = searchInput.value.trim().toLowerCase();
+                let firstVisible = null;
+                patientButtons.forEach((button) => {
+                    const matches = button.dataset.patientName.includes(query);
+                    button.style.display = matches ? 'block' : 'none';
+                    if (matches && !firstVisible) {
+                        firstVisible = button;
+                    }
+                });
+                if (firstVisible) {
+                    activatePatient(firstVisible.dataset.patientTarget);
+                } else {
+                    detailPanes.forEach((pane) => pane.classList.remove('active'));
+                }
+            });
+        }
+
+        function syncSymptomHidden(builder) {
+            const hidden = builder.querySelector('[data-symptom-hidden]');
+            const chips = Array.from(builder.querySelectorAll('.symptom-chip[data-value]'));
+            hidden.value = chips.map((chip) => chip.dataset.value).join(', ');
+        }
+
+        function addSymptomChip(builder, value) {
+            const cleaned = value.trim().replace(/\s+/g, ' ');
+            if (!cleaned) return;
+
+            const existing = Array.from(builder.querySelectorAll('.symptom-chip[data-value]'));
+            const lowered = cleaned.toLowerCase();
+            if (existing.some((chip) => chip.dataset.value.toLowerCase() === lowered)) {
+                return;
+            }
+
+            const list = builder.querySelector('[data-symptom-list]');
+            const chip = document.createElement('span');
+            chip.className = 'symptom-chip';
+            chip.dataset.value = cleaned;
+            chip.innerHTML = `<span>${cleaned}</span><button type="button" aria-label="Remove symptom">&times;</button>`;
+            chip.querySelector('button').addEventListener('click', () => {
+                chip.remove();
+                syncSymptomHidden(builder);
+            });
+            list.appendChild(chip);
+            syncSymptomHidden(builder);
+        }
+
+        document.querySelectorAll('[data-symptom-builder]').forEach((builder) => {
+            const input = builder.querySelector('[data-symptom-input]');
+            const addButton = builder.querySelector('[data-add-symptom]');
+
+            addButton.addEventListener('click', () => {
+                addSymptomChip(builder, input.value);
+                input.value = '';
+                input.focus();
+            });
+
+            input.addEventListener('keypress', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    addSymptomChip(builder, input.value);
+                    input.value = '';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

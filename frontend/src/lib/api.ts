@@ -2,7 +2,7 @@
  * API Client for Flask Backend Communication
  */
 
-import { ScheduleItem, RobotStatus, PatientVitals, RobotCommand, SystemHealth } from '@/src/types';
+import { ScheduleItem, RobotStatus, PatientVitals, SystemHealth } from '@/src/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
@@ -49,13 +49,6 @@ class ApiClient {
   // Robot Control Endpoints
   async getRobotStatus(): Promise<RobotStatus> {
     return this.fetchApi<RobotStatus>('/api/robot/status');
-  }
-
-  async sendRobotCommand(command: RobotCommand): Promise<{ success: boolean; message: string }> {
-    return this.fetchApi('/api/robot/command', {
-      method: 'POST',
-      body: JSON.stringify({ command }),
-    });
   }
 
   // Vitals Endpoints

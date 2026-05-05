@@ -76,6 +76,78 @@
         .bg-orange { background: var(--ios-orange); }
         .bg-red { background: var(--ios-red); }
 
+        .meta-copy {
+            margin-top: 12px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+
+        .inventory-form {
+            margin-top: 18px;
+            display: grid;
+            gap: 12px;
+        }
+
+        .inventory-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .inventory-field label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .inventory-field input,
+        .inventory-field textarea {
+            width: 100%;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            color: white;
+            padding: 10px 12px;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.9rem;
+        }
+
+        .inventory-field textarea {
+            min-height: 84px;
+            resize: vertical;
+        }
+
+        .inventory-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .inventory-save {
+            border: none;
+            border-radius: 12px;
+            background: var(--ios-blue);
+            color: white;
+            padding: 11px 14px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .inventory-save:disabled {
+            opacity: 0.65;
+            cursor: wait;
+        }
+
+        .inventory-status {
+            font-size: 0.82rem;
+            color: var(--text-muted);
+        }
+
         /* ALERT OVERLAY (iOS Style) */
         .alert-box {
             text-align: center;
@@ -103,6 +175,7 @@
             .content-container { padding: 100px 20px 40px; }
             .inventory-grid { grid-template-columns: 1fr; } /* Stack cards */
             .page-title { font-size: 1.8rem; text-align: center; }
+            .inventory-row { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -166,8 +239,109 @@
             document.querySelector('.navbar').classList.toggle('open');
         });
 
-        // Inventory Logic
-        document.addEventListener('DOMContentLoaded', async () => {
+        let lowStockAcknowledged = false;
+
+        function getProgressColor(percent) {
+            if (percent < 25) return 'bg-red';
+            if (percent < 50) return 'bg-orange';
+            return 'bg-green';
+        }
+
+        function renderInventoryCard(item) {
+            const percent = item.total > 0 ? Math.min((item.stock / item.total) * 100, 100) : 0;
+            const colorClass = getProgressColor(percent);
+
+            return `
+                <div class="inv-header">
+                    <div>
+                        <div class="inv-name">${item.name}</div>
+                        <div class="inv-dosage">${item.dosage || 'Dose not set'}</div>
+                    </div>
+                    <div class="inv-badge status-${item.status}">${item.status}</div>
+                </div>
+
+                <div class="stock-info">
+                    <span>${item.stock} / ${item.total} units</span>
+                    <span>${Math.round(percent)}%</span>
+                </div>
+
+                <div class="progress-track">
+                    <div class="progress-fill ${colorClass}" style="width: ${percent}%"></div>
+                </div>
+
+                <div class="meta-copy">
+                    Patient: ${item.patient}<br>
+                    Time: ${item.schedule_time || 'Not scheduled'}
+                </div>
+
+                <form class="inventory-form" data-medication-id="${item.id}">
+                    <div class="inventory-row">
+                        <div class="inventory-field">
+                            <label>Current Stock</label>
+                            <input type="number" name="stock" min="0" value="${item.stock}">
+                        </div>
+                        <div class="inventory-field">
+                            <label>Capacity</label>
+                            <input type="number" name="total" min="1" value="${item.total}">
+                        </div>
+                    </div>
+
+                    <div class="inventory-field">
+                        <label>Instructions</label>
+                        <textarea name="instructions" placeholder="No special instructions">${item.instructions || ''}</textarea>
+                    </div>
+
+                    <div class="inventory-actions">
+                        <button type="submit" class="inventory-save">Save Changes</button>
+                        <div class="inventory-status">Editable inventory values are saved directly to this medication.</div>
+                    </div>
+                </form>
+            `;
+        }
+
+        function attachInventoryEditors() {
+            document.querySelectorAll('.inventory-form').forEach((form) => {
+                form.addEventListener('submit', async (event) => {
+                    event.preventDefault();
+                    const saveButton = form.querySelector('.inventory-save');
+                    const status = form.querySelector('.inventory-status');
+                    const medicationId = form.dataset.medicationId;
+                    const payload = {
+                        stock: form.elements.stock.value,
+                        total: form.elements.total.value,
+                        instructions: form.elements.instructions.value,
+                    };
+
+                    saveButton.disabled = true;
+                    status.textContent = 'Saving...';
+                    status.style.color = '#8e8e93';
+
+                    try {
+                        const response = await fetch(`/api/inventory/${medicationId}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload),
+                        });
+                        const result = await response.json();
+
+                        if (!response.ok || !result.success) {
+                            throw new Error(result.message || 'Failed to update inventory.');
+                        }
+
+                        status.textContent = result.message || 'Inventory updated.';
+                        status.style.color = '#30d158';
+                        await loadInventory();
+                    } catch (error) {
+                        status.textContent = error.message || 'Failed to update inventory.';
+                        status.style.color = '#ff453a';
+                    } finally {
+                        saveButton.disabled = false;
+                    }
+                });
+            });
+        }
+
+        async function loadInventory() {
             const container = document.getElementById('inventoryContainer');
             const lowStockList = document.getElementById('lowStockList');
             const alertOverlay = document.getElementById('alertOverlay');
@@ -176,8 +350,9 @@
             try {
                 const res = await fetch('/api/inventory');
                 const data = await res.json();
-                
+                 
                 container.innerHTML = ''; // Clear loading
+                lowStockList.innerHTML = '';
 
                 if (data.length === 0) {
                     container.innerHTML = `<div style="grid-column:1/-1; text-align:center; color:#888;">No medications tracked.</div>`;
@@ -190,41 +365,16 @@
                         lowStockItems.push(`${item.name} (${item.stock} remaining)`);
                     }
 
-                    // Calculate Percentage
-                    const percent = Math.min((item.stock / item.total) * 100, 100);
-                    let colorClass = 'bg-green';
-                    if(percent < 50) colorClass = 'bg-orange';
-                    if(percent < 25) colorClass = 'bg-red';
-
                     const card = document.createElement('div');
                     card.className = 'inventory-card';
-                    card.innerHTML = `
-                        <div class="inv-header">
-                            <div>
-                                <div class="inv-name">${item.name}</div>
-                                <div class="inv-dosage">${item.dosage}</div>
-                            </div>
-                            <div class="inv-badge status-${item.status}">${item.status}</div>
-                        </div>
-                        
-                        <div class="stock-info">
-                            <span>${item.stock} / ${item.total} units</span>
-                            <span>${Math.round(percent)}%</span>
-                        </div>
-                        
-                        <div class="progress-track">
-                            <div class="progress-fill ${colorClass}" style="width: ${percent}%"></div>
-                        </div>
-                        
-                        <div style="margin-top:15px; font-size:0.8rem; color:#666;">
-                            ${item.instructions || 'No special instructions'}
-                        </div>
-                    `;
+                    card.innerHTML = renderInventoryCard(item);
                     container.appendChild(card);
                 });
 
+                attachInventoryEditors();
+
                 // Show Alert if needed
-                if(lowStockItems.length > 0) {
+                if(lowStockItems.length > 0 && !lowStockAcknowledged) {
                     lowStockItems.forEach(msg => {
                         const li = document.createElement('li');
                         li.textContent = msg;
@@ -237,9 +387,12 @@
                 console.error(error);
                 container.innerHTML = '<div style="color:#ff453a; text-align:center;">Failed to load inventory data.</div>';
             }
-        });
+        }
+
+        document.addEventListener('DOMContentLoaded', loadInventory);
 
         function closeAlert() {
+            lowStockAcknowledged = true;
             document.getElementById('alertOverlay').style.display = 'none';
         }
     </script>

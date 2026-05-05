@@ -34,12 +34,3 @@ export interface SystemHealth {
   database: boolean;
   timestamp: string;
 }
-
-export type RobotCommand = 
-  | 'forward' 
-  | 'backward' 
-  | 'left' 
-  | 'right' 
-  | 'stop' 
-  | 'dock' 
-  | 'emergency';

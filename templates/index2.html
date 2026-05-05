@@ -94,7 +94,7 @@
         .schedule-container::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.2); border-radius: 4px; }
         .schedule-container::-webkit-scrollbar-thumb { background: rgba(102, 126, 234, 0.4); border-radius: 4px; }
         
-        /* [Previous Patient Panel & Manual Control CSS remains unchanged] */
+        /* Legacy demo styles kept for layout consistency */
         .request-buttons { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1.25rem; margin-bottom: 2rem; }
         .request-btn { padding: 1.75rem 1.25rem; border: none; border-radius: 16px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); color: white; position: relative; overflow: hidden; font-family: 'Outfit', sans-serif; }
         .request-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
@@ -233,35 +233,6 @@
             </div>
         </div>
 
-        <div class="panel">
-            <h2 class="panel-title">
-                <div class="panel-icon">
-                    <svg viewBox="0 0 24 24" fill="none" width="16" height="16" stroke="white" stroke-width="2">
-                        <polyline points="4 17 10 11 4 5"></polyline>
-                        <line x1="12" y1="19" x2="20" y2="19"></line>
-                    </svg>
-                </div>
-                Manual Commands
-            </h2>
-            
-            <textarea 
-                class="command-input" 
-                id="manualCommandInput" 
-                placeholder="Enter detailed commands or prompts here...&#10;&#10;Example: Navigate to the kitchen and report temperature"
-            ></textarea>
-            
-            <button class="send-btn" id="sendCommandBtn">
-                 <svg viewBox="0 0 24 24" fill="none" width="20" height="20" stroke="white" stroke-width="2" style="display: inline-block; vertical-align: middle; margin-right: 8px;">
-                    <line x1="22" y1="2" x2="11" y2="13"></line>
-                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                </svg>
-                Send Command
-            </button>
-
-            <div class="response-area" id="responseArea">
-                Response will appear here...
-            </div>
-        </div>
     </div>
 
     <script>
@@ -457,16 +428,6 @@
 
             // [Original Event Listeners for Buttons]
             // ... (Keeping button logic for UI interaction)
-            const responseArea = document.getElementById('responseArea');
-            const manualCommandInput = document.getElementById('manualCommandInput');
-            
-            document.getElementById('sendCommandBtn').addEventListener('click', () => {
-                const cmd = manualCommandInput.value;
-                if(!cmd.trim()) return;
-                responseArea.textContent = `Sending command: ${cmd}...`;
-                setTimeout(() => { responseArea.textContent = `Executed: ${cmd}`; manualCommandInput.value=''; }, 1500);
-            });
-            
             // Voice button dummy logic
             const voiceBtn = document.getElementById('voiceBtn');
             const voiceOutput = document.getElementById('voiceOutput');

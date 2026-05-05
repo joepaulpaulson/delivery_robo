@@ -32,6 +32,7 @@ from sqlalchemy import text
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import google.generativeai as genai
+from config import Config
 
 
 load_dotenv()
@@ -64,7 +65,7 @@ ROBOT_COMMANDS = {
     "close_drawer",
 }
 DEFAULT_MAP_PAYLOAD = {"grid": [], "rooms": {}, "base": {"x": 2, "y": 2}}
-GRID_STEP_SECONDS = 4
+GRID_STEP_SECONDS = Config.GRID_STEP_SECONDS
 
 db = SQLAlchemy(app)
 login_manager = LoginManager()
@@ -461,6 +462,33 @@ def create_activity(user_id, action, details):
     db.session.add(ActivityLog(user_id=user_id, action=action, details=details))
 
 
+def normalize_symptom_tags(raw_value):
+    if isinstance(raw_value, str):
+        candidates = raw_value.split(",")
+    elif isinstance(raw_value, list):
+        candidates = raw_value
+    else:
+        candidates = []
+
+    normalized = []
+    seen = set()
+    for item in candidates:
+        cleaned = " ".join((item or "").strip().split())
+        if not cleaned:
+            continue
+        lowered = cleaned.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        normalized.append(cleaned[:40])
+    return normalized
+
+
+def serialize_symptom_tags(raw_value):
+    tags = normalize_symptom_tags(raw_value)
+    return ", ".join(tags) if tags else None
+
+
 def create_patient_history(
     patient,
     entry_type,
@@ -484,7 +512,7 @@ def create_patient_history(
         entry_type=entry_type,
         title=title[:120],
         details=(details or "")[:300] or None,
-        symptom_name=(symptom_name or "")[:100] or None,
+        symptom_name=serialize_symptom_tags(symptom_name),
         improvement_percent=improvement_percent,
         pain_level=pain_level,
         temperature=temperature,
@@ -499,6 +527,7 @@ def serialize_patient_history(entry):
     author = "System"
     if entry.created_by_account:
         author = "Caretaker" if entry.created_by_account.role == "ADMIN" else "Patient"
+    symptom_tags = normalize_symptom_tags(entry.symptom_name)
 
     return {
         "id": entry.id,
@@ -506,12 +535,14 @@ def serialize_patient_history(entry):
         "title": entry.title,
         "details": entry.details,
         "symptom_name": entry.symptom_name,
+        "symptom_tags": symptom_tags,
         "improvement_percent": entry.improvement_percent,
         "pain_level": entry.pain_level,
         "temperature": entry.temperature,
         "medicine_name": entry.medication.name if entry.medication else None,
         "author": author,
         "created_at": entry.created_at.isoformat() if entry.created_at else None,
+        "created_at_label": entry.created_at.strftime("%b %d, %Y %I:%M %p") if entry.created_at else "",
     }
 
 
@@ -720,6 +751,39 @@ def schedule_payload_for_user(user):
     return schedule
 
 
+def schedule_payload_for_patient(patient):
+    schedule = []
+    now_time = datetime.now().strftime("%H:%M")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_day = datetime.now().strftime("%a")
+
+    for med in patient.medications:
+        is_today = med.frequency == "Daily" or (med.days and today_day in med.days)
+        if not is_today:
+            continue
+
+        is_done = med.last_taken == today_str
+        status = "completed" if is_done else ("pending" if med.schedule_time <= now_time else "upcoming")
+        schedule.append(
+            {
+                "id": med.id,
+                "day": "Today",
+                "time": med.schedule_time,
+                "task": med.name,
+                "patient": patient.name,
+                "room_number": patient.room_number,
+                "type": "medicine",
+                "status": status,
+                "is_done": is_done,
+                "dosage": med.dosage,
+                "notes": med.instructions,
+            }
+        )
+
+    schedule.sort(key=lambda item: item["time"])
+    return schedule
+
+
 def today_schedule_api_payload(user):
     items = []
     for item in schedule_payload_for_user(user):
@@ -802,6 +866,10 @@ def patient_history_entries(patient, limit=None):
     return query.all()
 
 
+def serialized_patient_history_entries(patient, limit=None):
+    return [serialize_patient_history(entry) for entry in patient_history_entries(patient, limit=limit)]
+
+
 def serialize_recent_patient_requests(patient, limit=10):
     tasks = (
         RobotTask.query.filter_by(patient_id=patient.id)
@@ -828,6 +896,40 @@ def serialize_recent_patient_requests(patient, limit=10):
             }
         )
     return items
+
+
+def create_medication_for_patient(patient, data, *, actor_account=None):
+    name = (data.get("name") or "").strip()
+    schedule_time = (data.get("time") or "").strip()
+    if not name or not schedule_time:
+        return None, "Medicine name and time are required."
+
+    dosage = (data.get("dosage") or "").strip() or "1 pill"
+    instructions = (data.get("instructions") or "").strip() or "Manual Add"
+    try:
+        stock_value = int(data.get("stock") or 30)
+    except (TypeError, ValueError):
+        stock_value = 30
+
+    medication = Medication(
+        patient_id=patient.id,
+        name=name,
+        dosage=dosage,
+        stock=stock_value,
+        max_stock=stock_value,
+        schedule_time=schedule_time,
+        instructions=instructions,
+        frequency="Daily",
+        days="All",
+    )
+    db.session.add(medication)
+
+    create_activity(
+        patient.user_id,
+        f"Added {name}",
+        f"Medication added for {patient.name} at {schedule_time} in room {patient.room_number}.",
+    )
+    return medication, None
 
 
 def create_request_for_patient(patient, request_type, *, source="dashboard", created_by_account=None):
@@ -867,7 +969,17 @@ def create_request_for_patient(patient, request_type, *, source="dashboard", cre
             f"SOS request for room {resolved_room}",
             recipient_email=get_alert_email_for_user(owner_user),
         )
-        details += " Caregiver notified." if email_sent else " Caregiver notification failed."
+        trigger_emergency_robot_command(owner_user.id, source=source)
+        message = (
+            "Emergency assistance sent immediately. Caregiver notified."
+            if email_sent
+            else "Emergency assistance sent immediately, but caregiver email failed."
+        )
+        task.response_message = message
+        details = (
+            f"Emergency assistance triggered for {patient.name} in room {resolved_room}. "
+            + ("Caregiver notified." if email_sent else "Caregiver notification failed.")
+        )
     create_activity(owner_user.id, action, details)
 
     entry_type = {
@@ -922,6 +1034,11 @@ def queue_robot_command_for_user(user_id, command, source="dashboard"):
     state.current_task = f"Queued: {command}"
     state.updated_at = datetime.now()
     return task, message
+
+
+def trigger_emergency_robot_command(user_id, source="dashboard"):
+    task, _ = queue_robot_command_for_user(user_id, "emergency", source=source)
+    return task
 
 
 def create_navigation_task(user, room_number, source):
@@ -997,24 +1114,21 @@ def interpret_command_text(user, command_text, source, *, allow_robot_commands=T
             return {"success": False, "message": message}
         return {"success": True, "message": message, "action": "NAVIGATE", "task_id": task.id}
 
-    command_map = {
-        "return to dock": "dock",
-        "go home": "dock",
-        "dock": "dock",
-        "stop": "stop",
-        "halt": "stop",
-    }
+    command_map = {}
     if allow_robot_commands:
-        command_map.update(
-            {
-                "open drawer": "open_drawer",
-                "close drawer": "close_drawer",
-                "forward": "forward",
-                "backward": "backward",
-                "left": "left",
-                "right": "right",
-            }
-        )
+        command_map = {
+            "return to dock": "dock",
+            "go home": "dock",
+            "dock": "dock",
+            "stop": "stop",
+            "halt": "stop",
+            "open drawer": "open_drawer",
+            "close drawer": "close_drawer",
+            "forward": "forward",
+            "backward": "backward",
+            "left": "left",
+            "right": "right",
+        }
 
     for phrase, command in command_map.items():
         if phrase in lower_text:
@@ -1025,7 +1139,7 @@ def interpret_command_text(user, command_text, source, *, allow_robot_commands=T
     return {
         "success": False,
         "message": (
-            "Command not recognized. Try water, medicine, SOS, or return robot."
+            "Command not recognized. Try water, medicine, SOS, or go to room A-101."
             if not allow_robot_commands
             else "Command not recognized. Try water, medicine, SOS, dock, stop, or go to room A-101."
         ),
@@ -1071,12 +1185,7 @@ def interpret_patient_command_text(patient, command_text, source, *, created_by_
             return {"success": False, "message": message}
         return {"success": True, "message": message, "action": "MEDICINE", "task_id": task.id}
 
-    if any(keyword in lower_text for keyword in ["return robot", "send robot back", "go home", "dock", "return to dock"]):
-        task, message = queue_robot_command_for_user(patient.user_id, "dock", source=source)
-        create_activity(patient.user_id, "Patient Requested Dock", f"{patient.name} asked the robot to return to dock.")
-        return {"success": True, "message": message, "action": "DOCK", "task_id": task.id}
-
-    return {"success": False, "message": "Command not recognized. Try water, medicine, SOS, or return robot."}
+    return {"success": False, "message": "Command not recognized. Try water, medicine, or SOS."}
 
 
 def contains_emergency(text_value):
@@ -1631,7 +1740,7 @@ def index():
 def patients_page():
     admin_user = current_admin_user()
     patients = Patient.query.filter_by(user_id=admin_user.id).order_by(Patient.name.asc()).all()
-    recent_history = {patient.id: patient_history_entries(patient, limit=5) for patient in patients}
+    recent_history = {patient.id: serialized_patient_history_entries(patient, limit=5) for patient in patients}
     return render_template("patients.html", user=admin_user, patients=patients, recent_history=recent_history)
 
 
@@ -1738,25 +1847,46 @@ def add_patient_history_note(patient_id):
         flash("Patient not found.", "error")
         return redirect(url_for("patients_page"))
 
-    symptom_name = (request.form.get("symptom_name") or "").strip() or None
+    symptom_tags = normalize_symptom_tags(request.form.get("symptom_name"))
     details = (request.form.get("details") or "").strip() or None
-    improvement_percent = request.form.get("improvement_percent")
-    pain_level = request.form.get("pain_level")
-    temperature = request.form.get("temperature")
+    title = (
+        f"Symptoms: {', '.join(symptom_tags)}"
+        if symptom_tags
+        else "Caretaker note"
+    )
     create_patient_history(
         patient,
         entry_type="progress_update",
-        title=(request.form.get("title") or "Caretaker update").strip() or "Caretaker update",
+        title=title,
         details=details,
-        symptom_name=symptom_name,
-        improvement_percent=int(improvement_percent) if (improvement_percent or "").isdigit() else None,
-        pain_level=int(pain_level) if (pain_level or "").isdigit() else None,
-        temperature=float(temperature) if temperature else None,
+        symptom_name=symptom_tags,
         created_by_account=current_account(),
     )
     create_activity(current_admin_user().id, "Caretaker Note Added", f"Progress note added for {patient.name}.")
     db.session.commit()
     flash(f"History updated for {patient.name}.", "success")
+    return redirect(url_for("patients_page"))
+
+
+@app.route("/patients/<int:patient_id>/medications/add", methods=["POST"])
+@admin_required
+def add_patient_medication(patient_id):
+    patient = get_owned_patient(patient_id)
+    if not patient:
+        flash("Patient not found.", "error")
+        return redirect(url_for("patients_page"))
+
+    medication, error_message = create_medication_for_patient(
+        patient,
+        request.form,
+        actor_account=current_account(),
+    )
+    if not medication:
+        flash(error_message, "error")
+        return redirect(url_for("patients_page"))
+
+    db.session.commit()
+    flash(f"{medication.name} added for {patient.name}.", "success")
     return redirect(url_for("patients_page"))
 
 
@@ -1792,8 +1922,10 @@ def patient_dashboard():
     return render_template(
         "patient_dashboard.html",
         patient=patient,
+        stats=stats_payload_for_patient(patient),
+        medication_schedule=schedule_payload_for_patient(patient),
         recent_requests=serialize_recent_patient_requests(patient, limit=8),
-        history_preview=patient_history_entries(patient, limit=6),
+        history_preview=serialized_patient_history_entries(patient, limit=6),
     )
 
 
@@ -1804,7 +1936,7 @@ def patient_history_page():
     return render_template(
         "patient_history.html",
         patient=patient,
-        entries=patient_history_entries(patient),
+        entries=serialized_patient_history_entries(patient),
         stats=stats_payload_for_patient(patient),
     )
 
@@ -1919,11 +2051,14 @@ def get_inventory():
             if med.stock < 2:
                 status = "low"
             elif med.stock < 5:
-                status = "low"
+                status = "warning"
 
             total = med.max_stock if med.max_stock and med.max_stock > 0 else 30
             inventory.append(
                 {
+                    "id": med.id,
+                    "patient": patient.name,
+                    "medicine": med.name,
                     "name": f"{med.name} ({patient.name})",
                     "dosage": med.dosage,
                     "stock": med.stock,
@@ -1931,9 +2066,46 @@ def get_inventory():
                     "unit": "tablets",
                     "status": status,
                     "instructions": med.instructions,
+                    "schedule_time": med.schedule_time,
                 }
             )
     return jsonify(inventory)
+
+
+@app.route("/api/inventory/<int:medication_id>", methods=["POST"])
+@admin_required
+def update_inventory_item(medication_id):
+    medication = get_owned_medication(medication_id)
+    if not medication:
+        return jsonify({"success": False, "message": "Medication not found."}), 404
+
+    data = request.get_json(silent=True) or {}
+
+    try:
+        stock = int(data.get("stock"))
+        total = int(data.get("total"))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "message": "Stock and capacity must be numbers."}), 400
+
+    if stock < 0:
+        return jsonify({"success": False, "message": "Stock cannot be negative."}), 400
+    if total <= 0:
+        return jsonify({"success": False, "message": "Capacity must be at least 1."}), 400
+
+    stock = min(stock, total)
+    instructions = (data.get("instructions") or "").strip() or None
+
+    medication.stock = stock
+    medication.max_stock = total
+    medication.instructions = instructions
+
+    create_activity(
+        current_admin_user().id,
+        f"Updated Inventory: {medication.name}",
+        f"Stock set to {medication.stock}/{medication.max_stock} for {medication.patient.name}.",
+    )
+    db.session.commit()
+    return jsonify({"success": True, "message": "Inventory updated."})
 
 
 @app.route("/api/vitals/current")
@@ -2085,6 +2257,7 @@ def process_voice():
         current_admin_user(),
         user_text,
         source="voice",
+        allow_robot_commands=False,
         created_by_account=current_account(),
     )
     if result["success"]:
@@ -2104,35 +2277,13 @@ def add_task():
     if not patient:
         return jsonify({"success": False, "message": "Select a valid patient first."}), 400
 
-    name = (data.get("name") or "").strip()
-    schedule_time = (data.get("time") or "").strip()
-    if not name or not schedule_time:
-        return jsonify({"success": False, "message": "Medicine name and time are required."}), 400
-
-    dosage = (data.get("dosage") or "").strip() or "1 pill"
-    instructions = (data.get("instructions") or "").strip() or "Manual Add"
-    try:
-        stock_value = int(data.get("stock") or 30)
-    except (TypeError, ValueError):
-        stock_value = 30
-
-    new_med = Medication(
-        patient_id=patient.id,
-        name=name,
-        dosage=dosage,
-        stock=stock_value,
-        max_stock=stock_value,
-        schedule_time=schedule_time,
-        instructions=instructions,
-        frequency="Daily",
-        days="All",
+    new_med, error_message = create_medication_for_patient(
+        patient,
+        data,
+        actor_account=current_account(),
     )
-    db.session.add(new_med)
-    create_activity(
-        admin_user.id,
-        f"Added {name}",
-        f"Medication added for {patient.name} at {schedule_time} in room {patient.room_number}.",
-    )
+    if not new_med:
+        return jsonify({"success": False, "message": error_message}), 400
     db.session.commit()
     return jsonify({"success": True})
 
@@ -2231,7 +2382,6 @@ def emergency_request():
         db.session.rollback()
         return jsonify({"success": False, "message": message}), 400
 
-    queue_robot_command_for_user(admin_user.id, "emergency", source="dashboard")
     db.session.commit()
     return jsonify({"success": True, "message": message})
 

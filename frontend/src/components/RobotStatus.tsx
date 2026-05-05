@@ -6,23 +6,15 @@ import {
   Battery, 
   Wifi, 
   Heart, 
-  Video,
-  ChevronUp,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Square,
-  Home
+  Video
 } from 'lucide-react';
 import { apiClient } from '@/src/lib/api';
-import { RobotCommand } from '@/src/types';
 
 export function RobotStatus() {
   // Demo fallback data - shows even when API fails
   const [battery, setBattery] = useState(85);
   const [heartRate, setHeartRate] = useState(72);
   const [isAlert, setIsAlert] = useState(false);
-  const [activeCommand, setActiveCommand] = useState<RobotCommand | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -43,16 +35,6 @@ export function RobotStatus() {
     const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
   }, []);
-
-  const handleCommand = async (command: RobotCommand) => {
-    setActiveCommand(command);
-    try {
-      await apiClient.sendRobotCommand(command);
-    } catch (error) {
-      console.log('Command:', command);
-    }
-    setTimeout(() => setActiveCommand(null), 300);
-  };
 
   const getBatteryColor = (level: number) => {
     if (level > 60) return 'text-emerald-400';
@@ -152,97 +134,6 @@ export function RobotStatus() {
         </div>
       </motion.div>
 
-      {/* Manual Controls Panel */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 rounded-xl p-4 shadow-xl"
-      >
-        <h3 className="font-bold text-xs text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-          Manual Control
-        </h3>
-        
-        {/* D-Pad Grid */}
-        <div className="grid grid-cols-3 gap-2 max-w-[180px] mx-auto mb-4">
-          {/* Row 1 */}
-          <div />
-          <ControlButton
-            icon={ChevronUp}
-            command="forward"
-            active={activeCommand === 'forward'}
-            onClick={handleCommand}
-          />
-          <div />
-          
-          {/* Row 2 */}
-          <ControlButton
-            icon={ChevronLeft}
-            command="left"
-            active={activeCommand === 'left'}
-            onClick={handleCommand}
-          />
-          <ControlButton
-            icon={Square}
-            command="stop"
-            active={activeCommand === 'stop'}
-            onClick={handleCommand}
-            variant="danger"
-          />
-          <ControlButton
-            icon={ChevronRight}
-            command="right"
-            active={activeCommand === 'right'}
-            onClick={handleCommand}
-          />
-          
-          {/* Row 3 */}
-          <div />
-          <ControlButton
-            icon={ChevronDown}
-            command="backward"
-            active={activeCommand === 'backward'}
-            onClick={handleCommand}
-          />
-          <div />
-        </div>
-
-        {/* Return to Dock Button */}
-        <button
-          onClick={() => handleCommand('dock')}
-          className="w-full py-3 rounded-lg bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all font-semibold text-white text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-500/30"
-        >
-          <Home className="w-4 h-4" />
-          Return to Dock
-        </button>
-      </motion.div>
     </div>
-  );
-}
-
-interface ControlButtonProps {
-  icon: React.ElementType;
-  command: RobotCommand;
-  active: boolean;
-  onClick: (command: RobotCommand) => void;
-  variant?: 'default' | 'danger';
-}
-
-function ControlButton({ icon: Icon, command, active, onClick, variant = 'default' }: ControlButtonProps) {
-  return (
-    <motion.button
-      whileTap={{ scale: 0.85 }}
-      onClick={() => onClick(command)}
-      className={`aspect-square rounded-lg border-2 transition-all flex items-center justify-center ${
-        variant === 'danger'
-          ? 'bg-red-600 border-red-500 hover:bg-red-700 shadow-lg shadow-red-500/30'
-          : active
-          ? 'bg-blue-600 border-blue-400 shadow-lg shadow-blue-500/50'
-          : 'bg-slate-800 border-slate-600 hover:bg-slate-700 hover:border-slate-500'
-      }`}
-    >
-      <Icon className="w-6 h-6 text-white" />
-    </motion.button>
   );
 }

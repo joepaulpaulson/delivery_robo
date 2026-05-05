@@ -96,6 +96,7 @@ class Config:
     # Schedule Settings
     MEDICINE_TIMES = ['08:00', '14:00', '20:00']  # Daily medicine schedule
     WATER_REMINDER_INTERVAL = 2  # Hours
+    GRID_STEP_SECONDS = int(os.environ.get('GRID_STEP_SECONDS', '4'))
 
 # ==================== HARDWARE PINS (Reference Only) ====================
 class HardwareConfig:

@@ -284,43 +284,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if(voiceMsg) voiceMsg.innerText = "Voice not supported";
     }
 
-    // ==================== MANUAL TEXT COMMAND (AI POWERED) ====================
-    const sendBtn = document.getElementById('sendCommandBtn');
-    const manualInput = document.getElementById('manualCommandInput');
-    const responseArea = document.getElementById('responseArea');
-
-    async function processManualCommand() {
-        const text = manualInput.value.trim();
-        if (!text) return;
-
-        setStatusMessage(responseArea, "Queuing command...", "#aaa");
-
-        try {
-            const res = await fetch('/api/voice/process', {
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ text: text })
-            });
-            const result = await res.json();
-            
-            if(result.success) {
-                setStatusMessage(responseArea, result.message, "#30d158");
-                syncRobotVisualFromAction(result.action);
-                window.fetchSchedule();
-            } else {
-                setStatusMessage(responseArea, result.message || result.error || "I didn't understand.", "#ff453a");
-            }
-        } catch(err) { 
-            console.error(err);
-            setStatusMessage(responseArea, "Connection Error", "#ff453a");
-        }
-        manualInput.value = '';
-    }
-
-    if(sendBtn){
-        sendBtn.addEventListener('click', processManualCommand);
-        manualInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') processManualCommand(); });
-    }
 });
 
 // ==================== 3. GLOBAL FUNCTIONS ====================
@@ -363,7 +326,6 @@ window.submitNewTask = async () => {
 
 window.sendRequest = async (type) => {
     const voiceMsg = document.getElementById('voiceMessage');
-    const responseArea = document.getElementById('responseArea');
 
     try {
         const res = await fetch('/api/request', {
@@ -374,15 +336,12 @@ window.sendRequest = async (type) => {
         const data = await res.json();
         if (data.success) {
             setStatusMessage(voiceMsg, data.message, "#30d158");
-            setStatusMessage(responseArea, data.message, "#30d158");
         } else {
             setStatusMessage(voiceMsg, data.message || "Request failed", "#ff453a");
-            setStatusMessage(responseArea, data.message || "Request failed", "#ff453a");
         }
     } catch(e) {
         console.error(e);
         setStatusMessage(voiceMsg, "Request failed", "#ff453a");
-        setStatusMessage(responseArea, "Request failed", "#ff453a");
     }
 };
 

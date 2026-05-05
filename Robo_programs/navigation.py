@@ -1,7 +1,16 @@
 import requests
+import sys
+from pathlib import Path
 
 
-STEP_DURATION = 4.0
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from config import Config
+
+
+STEP_DURATION = float(Config.GRID_STEP_SECONDS)
 TURN_DURATION = 0.8
 DEFAULT_HEADING = "N"
 

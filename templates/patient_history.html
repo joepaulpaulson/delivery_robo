@@ -63,6 +63,21 @@
             flex-direction: column;
             gap: 12px;
         }
+        .symptom-chip-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .symptom-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(56, 189, 248, 0.18);
+            color: #d7f1ff;
+            font-size: 0.86rem;
+        }
         .entry {
             background: rgba(20, 20, 22, 0.86);
             border: 1px solid rgba(255, 255, 255, 0.08);
@@ -108,15 +123,14 @@
             <div class="entry">
                 <strong>{{ entry.title }}</strong>
                 <div>{{ entry.details or 'No extra details.' }}</div>
-                {% if entry.symptom_name or entry.improvement_percent is not none or entry.pain_level is not none or entry.temperature is not none %}
-                <div class="meta">
-                    {% if entry.symptom_name %}Symptom: {{ entry.symptom_name }}{% endif %}
-                    {% if entry.improvement_percent is not none %} · Improvement: {{ entry.improvement_percent }}%{% endif %}
-                    {% if entry.pain_level is not none %} · Pain: {{ entry.pain_level }}/10{% endif %}
-                    {% if entry.temperature is not none %} · Temperature: {{ entry.temperature }}°C{% endif %}
+                {% if entry.symptom_tags %}
+                <div class="symptom-chip-list">
+                    {% for symptom in entry.symptom_tags %}
+                    <span class="symptom-chip">{{ symptom }}</span>
+                    {% endfor %}
                 </div>
                 {% endif %}
-                <div class="meta">{{ entry.created_at.strftime('%b %d, %Y %I:%M %p') }}</div>
+                <div class="meta">{{ entry.created_at_label }}</div>
             </div>
             {% else %}
             <div class="entry">
