@@ -4,6 +4,7 @@ import re
 import smtplib
 from datetime import datetime
 from email.mime.text import MIMEText
+from functools import wraps
 
 from dotenv import load_dotenv
 from flask import (
@@ -101,19 +102,43 @@ else:
     print("Google API key not configured.")
 
 
-class User(UserMixin, db.Model):
+class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
     password = db.Column(db.String(150), nullable=False)
     patients = db.relationship("Patient", backref="caregiver", lazy=True)
 
 
+class Account(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    role = db.Column(db.String(20), nullable=False)
+    email = db.Column(db.String(150), unique=True, nullable=True)
+    username = db.Column(db.String(150), unique=True, nullable=True)
+    password = db.Column(db.String(150), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    patient_id = db.Column(db.Integer, db.ForeignKey("patient.id"), unique=True, nullable=True)
+
+    admin_user = db.relationship("User", foreign_keys=[user_id])
+    patient = db.relationship("Patient", foreign_keys=[patient_id], back_populates="account")
+
+    @property
+    def display_name(self):
+        if self.role == "ADMIN":
+            return self.email or (self.admin_user.username if self.admin_user else "Admin")
+        return self.username or (self.patient.name if self.patient else "Patient")
+
+
 class Patient(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     name = db.Column(db.String(100), nullable=False)
+    age = db.Column(db.Integer, nullable=True)
+    gender = db.Column(db.String(30), nullable=True)
     room_number = db.Column(db.String(10), nullable=False, default="A-101")
+    bed_number = db.Column(db.String(20), nullable=True)
+    emergency_notes = db.Column(db.String(200), nullable=True)
     medications = db.relationship("Medication", backref="patient", lazy=True)
+    account = db.relationship("Account", back_populates="patient", uselist=False)
 
 
 class Medication(db.Model):
@@ -136,6 +161,26 @@ class ActivityLog(db.Model):
     action = db.Column(db.String(100), nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.now)
     details = db.Column(db.String(200))
+
+
+class PatientHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    patient_id = db.Column(db.Integer, db.ForeignKey("patient.id"), nullable=False)
+    created_by_account_id = db.Column(db.Integer, db.ForeignKey("account.id"), nullable=True)
+    entry_type = db.Column(db.String(40), nullable=False)
+    title = db.Column(db.String(120), nullable=False)
+    details = db.Column(db.String(300), nullable=True)
+    symptom_name = db.Column(db.String(100), nullable=True)
+    improvement_percent = db.Column(db.Integer, nullable=True)
+    pain_level = db.Column(db.Integer, nullable=True)
+    temperature = db.Column(db.Float, nullable=True)
+    medicine_id = db.Column(db.Integer, db.ForeignKey("medication.id"), nullable=True)
+    request_task_id = db.Column(db.Integer, db.ForeignKey("robot_task.id"), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    patient = db.relationship("Patient", foreign_keys=[patient_id])
+    created_by_account = db.relationship("Account", foreign_keys=[created_by_account_id])
+    medication = db.relationship("Medication", foreign_keys=[medicine_id])
 
 
 class UserMap(db.Model):
@@ -190,7 +235,7 @@ class RobotTask(db.Model):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return db.session.get(User, int(user_id))
+    return db.session.get(Account, int(user_id))
 
 
 def ensure_legacy_schema():
@@ -204,6 +249,10 @@ def ensure_legacy_schema():
         row["name"]
         for row in db.session.execute(text("PRAGMA table_info(medication)")).mappings().all()
     }
+    user_columns = {
+        row["name"]
+        for row in db.session.execute(text("PRAGMA table_info(user)")).mappings().all()
+    }
     robot_state_columns = {
         row["name"]
         for row in db.session.execute(text("PRAGMA table_info(robot_state)")).mappings().all()
@@ -215,10 +264,20 @@ def ensure_legacy_schema():
                 "ALTER TABLE patient ADD COLUMN room_number VARCHAR(10) DEFAULT 'A-101'"
             )
         )
+    if "age" not in patient_columns:
+        db.session.execute(text("ALTER TABLE patient ADD COLUMN age INTEGER"))
+    if "gender" not in patient_columns:
+        db.session.execute(text("ALTER TABLE patient ADD COLUMN gender VARCHAR(30)"))
+    if "bed_number" not in patient_columns:
+        db.session.execute(text("ALTER TABLE patient ADD COLUMN bed_number VARCHAR(20)"))
+    if "emergency_notes" not in patient_columns:
+        db.session.execute(text("ALTER TABLE patient ADD COLUMN emergency_notes VARCHAR(200)"))
     if "max_stock" not in medication_columns:
         db.session.execute(
             text("ALTER TABLE medication ADD COLUMN max_stock INTEGER DEFAULT 30")
         )
+    if "password" not in user_columns:
+        db.session.execute(text("ALTER TABLE user ADD COLUMN password VARCHAR(150)"))
     if "current_stop_index" not in robot_state_columns:
         db.session.execute(
             text("ALTER TABLE robot_state ADD COLUMN current_stop_index INTEGER DEFAULT 0")
@@ -251,6 +310,27 @@ def ensure_legacy_schema():
         )
     )
     db.session.commit()
+    bootstrap_accounts()
+
+
+def bootstrap_accounts():
+    changed = False
+    for user in User.query.all():
+        existing_account = Account.query.filter_by(user_id=user.id, role="ADMIN").first()
+        if existing_account:
+            continue
+        admin_account = Account(
+            role="ADMIN",
+            email=user.username,
+            username=None,
+            password=user.password,
+            user_id=user.id,
+        )
+        db.session.add(admin_account)
+        changed = True
+
+    if changed:
+        db.session.commit()
 
 
 def normalize_room_number(room_number):
@@ -261,14 +341,90 @@ def validate_room_number(room_number):
     return bool(ROOM_PATTERN.match(normalize_room_number(room_number)))
 
 
-def get_user_context():
-    if not current_user.is_authenticated:
+def current_account():
+    if current_user.is_authenticated and isinstance(current_user, Account):
+        return current_user
+    return None
+
+
+def current_admin_user():
+    account = current_account()
+    if not account:
+        return None
+    if account.role == "ADMIN":
+        return account.admin_user
+    if account.role == "PATIENT" and account.patient:
+        return account.patient.caregiver
+    return None
+
+
+def current_patient_profile():
+    account = current_account()
+    if account and account.role == "PATIENT":
+        return account.patient
+    return None
+
+
+def admin_required(view_func):
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return login_manager.unauthorized()
+        if not current_account() or current_account().role != "ADMIN":
+            flash("Admin access only.", "error")
+            if current_account() and current_account().role == "PATIENT":
+                return redirect(url_for("patient_dashboard"))
+            return redirect(url_for("login"))
+        return view_func(*args, **kwargs)
+
+    return wrapped
+
+
+def patient_required(view_func):
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return redirect(url_for("patient_login"))
+        if not current_account() or current_account().role != "PATIENT":
+            flash("Patient access only.", "error")
+            if current_account() and current_account().role == "ADMIN":
+                return redirect(url_for("index"))
+            return redirect(url_for("patient_login"))
+        return view_func(*args, **kwargs)
+
+    return wrapped
+
+
+def patient_account_for_patient(patient):
+    if not patient:
+        return None
+    return Account.query.filter_by(patient_id=patient.id, role="PATIENT").first()
+
+
+def admin_account_for_user(user):
+    if not user:
+        return None
+    return Account.query.filter_by(user_id=user.id, role="ADMIN").first()
+
+
+def get_alert_email_for_user(user):
+    admin_account = admin_account_for_user(user)
+    return (admin_account.email if admin_account and admin_account.email else None) or CAREGIVER_EMAIL
+
+
+def get_user_context(user=None, patient=None):
+    if not user and not patient:
+        user = current_admin_user()
+        patient = current_patient_profile()
+
+    if not user and not patient:
         return "No user logged in."
 
     context = []
-    for patient in current_user.patients:
-        patient_info = [f"PATIENT: {patient.name} ({patient.room_number})", "MEDS:"]
-        for med in patient.medications:
+    patients = [patient] if patient else list(user.patients)
+    for patient_item in patients:
+        patient_info = [f"PATIENT: {patient_item.name} ({patient_item.room_number})", "MEDS:"]
+        for med in patient_item.medications:
             patient_info.append(
                 f" - {med.name} ({med.dosage}): Stock {med.stock}, Due {med.schedule_time}, Note: {med.instructions}"
             )
@@ -276,23 +432,25 @@ def get_user_context():
     return "\n\n".join(context)
 
 
-def send_emergency_email(user_name, details):
+def send_emergency_email(user_name, details, recipient_email=None):
     try:
         if not SENDER_EMAIL or not SENDER_PASSWORD:
             print("Email configuration missing. Skipping email send.")
             return False
+
+        destination_email = recipient_email or CAREGIVER_EMAIL
 
         msg = MIMEText(
             f"URGENT ALERT: {user_name} triggered an emergency.\n\nDetails: {details}\nTime: {datetime.now()}"
         )
         msg["Subject"] = f"SOS ALERT - {user_name}"
         msg["From"] = SENDER_EMAIL
-        msg["To"] = CAREGIVER_EMAIL
+        msg["To"] = destination_email
 
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
             server.starttls()
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
-            server.sendmail(SENDER_EMAIL, [CAREGIVER_EMAIL], msg.as_string())
+            server.sendmail(SENDER_EMAIL, [destination_email], msg.as_string())
         return True
     except Exception as email_error:
         print(f"Email failed: {email_error}")
@@ -301,6 +459,60 @@ def send_emergency_email(user_name, details):
 
 def create_activity(user_id, action, details):
     db.session.add(ActivityLog(user_id=user_id, action=action, details=details))
+
+
+def create_patient_history(
+    patient,
+    entry_type,
+    title,
+    *,
+    details=None,
+    symptom_name=None,
+    improvement_percent=None,
+    pain_level=None,
+    temperature=None,
+    medication=None,
+    request_task=None,
+    created_by_account=None,
+):
+    if not patient:
+        return None
+
+    history_entry = PatientHistory(
+        patient_id=patient.id,
+        created_by_account_id=created_by_account.id if created_by_account else None,
+        entry_type=entry_type,
+        title=title[:120],
+        details=(details or "")[:300] or None,
+        symptom_name=(symptom_name or "")[:100] or None,
+        improvement_percent=improvement_percent,
+        pain_level=pain_level,
+        temperature=temperature,
+        medicine_id=medication.id if medication else None,
+        request_task_id=request_task.id if request_task else None,
+    )
+    db.session.add(history_entry)
+    return history_entry
+
+
+def serialize_patient_history(entry):
+    author = "System"
+    if entry.created_by_account:
+        author = "Caretaker" if entry.created_by_account.role == "ADMIN" else "Patient"
+
+    return {
+        "id": entry.id,
+        "entry_type": entry.entry_type,
+        "title": entry.title,
+        "details": entry.details,
+        "symptom_name": entry.symptom_name,
+        "improvement_percent": entry.improvement_percent,
+        "pain_level": entry.pain_level,
+        "temperature": entry.temperature,
+        "medicine_name": entry.medication.name if entry.medication else None,
+        "author": author,
+        "created_at": entry.created_at.isoformat() if entry.created_at else None,
+    }
 
 
 def parse_map_payload(user_map):
@@ -396,15 +608,21 @@ def get_primary_patient(user):
 
 
 def get_owned_patient(patient_id):
+    admin_user = current_admin_user()
     if patient_id is None:
         return None
-    return Patient.query.filter_by(id=patient_id, user_id=current_user.id).first()
+    if not admin_user:
+        return None
+    return Patient.query.filter_by(id=patient_id, user_id=admin_user.id).first()
 
 
 def get_owned_medication(medication_id):
+    admin_user = current_admin_user()
+    if not admin_user:
+        return None
     return (
         Medication.query.join(Patient, Medication.patient_id == Patient.id)
-        .filter(Medication.id == medication_id, Patient.user_id == current_user.id)
+        .filter(Medication.id == medication_id, Patient.user_id == admin_user.id)
         .first()
     )
 
@@ -553,9 +771,68 @@ def stats_payload_for_user(user):
     }
 
 
-def create_dashboard_request(user, request_type, source="dashboard", room_number=None):
-    primary_patient = get_primary_patient(user)
-    resolved_room = normalize_room_number(room_number or (primary_patient.room_number if primary_patient else ""))
+def stats_payload_for_patient(patient):
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    total = len(patient.medications)
+    taken = sum(1 for med in patient.medications if med.last_taken == today_str)
+    missed = max(total - taken, 0)
+    score = int((taken / total) * 100) if total else 0
+    request_counts = {"queued": 0, "dispatched": 0, "completed": 0, "failed": 0}
+    for status, count in (
+        db.session.query(RobotTask.status, db.func.count(RobotTask.id))
+        .filter(RobotTask.patient_id == patient.id)
+        .group_by(RobotTask.status)
+        .all()
+    ):
+        request_counts[status] = count
+
+    return {
+        "total": total,
+        "taken": taken,
+        "missed": missed,
+        "score": score,
+        "requests": request_counts,
+    }
+
+
+def patient_history_entries(patient, limit=None):
+    query = PatientHistory.query.filter_by(patient_id=patient.id).order_by(PatientHistory.created_at.desc())
+    if limit:
+        query = query.limit(limit)
+    return query.all()
+
+
+def serialize_recent_patient_requests(patient, limit=10):
+    tasks = (
+        RobotTask.query.filter_by(patient_id=patient.id)
+        .order_by(RobotTask.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    items = []
+    label_map = {
+        "medicine_delivery": "Medicine",
+        "water_delivery": "Water",
+        "help_request": "SOS",
+        "room_navigation": "Navigation",
+        "robot_command": "Robot Command",
+    }
+    for task in tasks:
+        items.append(
+            {
+                "id": task.id,
+                "label": label_map.get(task.task_type, task.task_type.replace("_", " ").title()),
+                "status": task.status.title(),
+                "created_at": task.created_at.isoformat() if task.created_at else None,
+                "message": task.response_message,
+            }
+        )
+    return items
+
+
+def create_request_for_patient(patient, request_type, *, source="dashboard", created_by_account=None):
+    owner_user = patient.caregiver if patient else None
+    resolved_room = normalize_room_number(patient.room_number if patient else "")
     if not validate_room_number(resolved_room):
         return None, "Complete patient setup with a valid room before sending robot requests."
 
@@ -568,13 +845,13 @@ def create_dashboard_request(user, request_type, source="dashboard", room_number
 
     payload = {
         "request_type": request_type,
-        "patient_name": primary_patient.name if primary_patient else user.username,
+        "patient_name": patient.name if patient else (owner_user.username if owner_user else "Patient"),
         "room_number": resolved_room,
     }
     task = queue_robot_task(
-        user.id,
+        owner_user.id,
         task_type,
-        patient=primary_patient,
+        patient=patient,
         room_number=resolved_room,
         payload=payload,
         priority=priority,
@@ -583,12 +860,50 @@ def create_dashboard_request(user, request_type, source="dashboard", room_number
     )
 
     action = "EMERGENCY ALERT" if request_type == "help" else f"Requested {request_type.capitalize()}"
-    details = f"{request_type.capitalize()} request queued for room {resolved_room}."
+    details = f"{request_type.capitalize()} request queued for {patient.name} in room {resolved_room}."
     if request_type == "help":
-        email_sent = send_emergency_email(user.username, f"Dashboard SOS for room {resolved_room}")
+        email_sent = send_emergency_email(
+            patient.name,
+            f"SOS request for room {resolved_room}",
+            recipient_email=get_alert_email_for_user(owner_user),
+        )
         details += " Caregiver notified." if email_sent else " Caregiver notification failed."
-    create_activity(user.id, action, details)
+    create_activity(owner_user.id, action, details)
+
+    entry_type = {
+        "medicine": "medicine_requested",
+        "water": "water_requested",
+        "help": "sos_alert",
+    }[request_type]
+    create_patient_history(
+        patient,
+        entry_type,
+        title=f"{request_type.capitalize()} requested",
+        details=details,
+        request_task=task,
+        created_by_account=created_by_account,
+    )
     return task, message
+
+
+def create_dashboard_request(user, request_type, source="dashboard", room_number=None, created_by_account=None):
+    primary_patient = get_primary_patient(user)
+    if room_number:
+        normalized_room = normalize_room_number(room_number)
+        explicit_patient = next(
+            (patient for patient in user.patients if normalize_room_number(patient.room_number) == normalized_room),
+            None,
+        )
+        if explicit_patient:
+            primary_patient = explicit_patient
+    if not primary_patient:
+        return None, "Complete patient setup with a valid room before sending robot requests."
+    return create_request_for_patient(
+        primary_patient,
+        request_type,
+        source=source,
+        created_by_account=created_by_account,
+    )
 
 
 def queue_robot_command_for_user(user_id, command, source="dashboard"):
@@ -631,7 +946,7 @@ def create_navigation_task(user, room_number, source):
     return task, f"Navigation to {normalized_room} queued."
 
 
-def interpret_command_text(user, command_text, source):
+def interpret_command_text(user, command_text, source, *, allow_robot_commands=True, created_by_account=None):
     text_value = (command_text or "").strip()
     if not text_value:
         return {"success": False, "message": "Please enter a command."}
@@ -641,20 +956,36 @@ def interpret_command_text(user, command_text, source):
     room_number = normalize_room_number(room_match.group(1)) if room_match else None
 
     if any(keyword in lower_text for keyword in ["sos", "panic", "emergency", "help me"]):
-        task, message = create_dashboard_request(user, "help", source=source, room_number=room_number)
+        task, message = create_dashboard_request(
+            user,
+            "help",
+            source=source,
+            room_number=room_number,
+            created_by_account=created_by_account,
+        )
         if not task:
             return {"success": False, "message": message}
         return {"success": True, "message": message, "action": "HELP", "task_id": task.id}
 
     if "water" in lower_text:
-        task, message = create_dashboard_request(user, "water", source=source, room_number=room_number)
+        task, message = create_dashboard_request(
+            user,
+            "water",
+            source=source,
+            room_number=room_number,
+            created_by_account=created_by_account,
+        )
         if not task:
             return {"success": False, "message": message}
         return {"success": True, "message": message, "action": "WATER", "task_id": task.id}
 
     if any(keyword in lower_text for keyword in ["medicine", "medication", "pill", "tablet", "dispense"]):
         task, message = create_dashboard_request(
-            user, "medicine", source=source, room_number=room_number
+            user,
+            "medicine",
+            source=source,
+            room_number=room_number,
+            created_by_account=created_by_account,
         )
         if not task:
             return {"success": False, "message": message}
@@ -667,18 +998,23 @@ def interpret_command_text(user, command_text, source):
         return {"success": True, "message": message, "action": "NAVIGATE", "task_id": task.id}
 
     command_map = {
-        "open drawer": "open_drawer",
-        "close drawer": "close_drawer",
         "return to dock": "dock",
         "go home": "dock",
         "dock": "dock",
         "stop": "stop",
         "halt": "stop",
-        "forward": "forward",
-        "backward": "backward",
-        "left": "left",
-        "right": "right",
     }
+    if allow_robot_commands:
+        command_map.update(
+            {
+                "open drawer": "open_drawer",
+                "close drawer": "close_drawer",
+                "forward": "forward",
+                "backward": "backward",
+                "left": "left",
+                "right": "right",
+            }
+        )
 
     for phrase, command in command_map.items():
         if phrase in lower_text:
@@ -688,8 +1024,59 @@ def interpret_command_text(user, command_text, source):
 
     return {
         "success": False,
-        "message": "Command not recognized. Try water, medicine, SOS, dock, stop, or go to room A-101.",
+        "message": (
+            "Command not recognized. Try water, medicine, SOS, or return robot."
+            if not allow_robot_commands
+            else "Command not recognized. Try water, medicine, SOS, dock, stop, or go to room A-101."
+        ),
     }
+
+
+def interpret_patient_command_text(patient, command_text, source, *, created_by_account=None):
+    text_value = (command_text or "").strip()
+    if not text_value:
+        return {"success": False, "message": "Please enter a command."}
+
+    lower_text = text_value.lower()
+    if any(keyword in lower_text for keyword in ["sos", "panic", "emergency", "help me", "call caretaker"]):
+        task, message = create_request_for_patient(
+            patient,
+            "help",
+            source=source,
+            created_by_account=created_by_account,
+        )
+        if not task:
+            return {"success": False, "message": message}
+        return {"success": True, "message": message, "action": "HELP", "task_id": task.id}
+
+    if "water" in lower_text:
+        task, message = create_request_for_patient(
+            patient,
+            "water",
+            source=source,
+            created_by_account=created_by_account,
+        )
+        if not task:
+            return {"success": False, "message": message}
+        return {"success": True, "message": message, "action": "WATER", "task_id": task.id}
+
+    if any(keyword in lower_text for keyword in ["medicine", "medication", "pill", "tablet"]):
+        task, message = create_request_for_patient(
+            patient,
+            "medicine",
+            source=source,
+            created_by_account=created_by_account,
+        )
+        if not task:
+            return {"success": False, "message": message}
+        return {"success": True, "message": message, "action": "MEDICINE", "task_id": task.id}
+
+    if any(keyword in lower_text for keyword in ["return robot", "send robot back", "go home", "dock", "return to dock"]):
+        task, message = queue_robot_command_for_user(patient.user_id, "dock", source=source)
+        create_activity(patient.user_id, "Patient Requested Dock", f"{patient.name} asked the robot to return to dock.")
+        return {"success": True, "message": message, "action": "DOCK", "task_id": task.id}
+
+    return {"success": False, "message": "Command not recognized. Try water, medicine, SOS, or return robot."}
 
 
 def contains_emergency(text_value):
@@ -1004,6 +1391,44 @@ def build_due_delivery_batch(user):
     return route_plan
 
 
+def create_patient_account(patient, username, password):
+    normalized_username = (username or "").strip()
+    account = patient_account_for_patient(patient)
+    if account:
+        normalized_username = normalized_username or account.username
+        if not normalized_username:
+            return None, "Patient username is required."
+        existing = Account.query.filter(Account.username == normalized_username, Account.patient_id != patient.id).first()
+        if existing:
+            return None, "That patient username is already in use."
+        account.username = normalized_username
+        if password:
+            account.password = generate_password_hash(password, method="pbkdf2:sha256")
+    else:
+        if not normalized_username or not password:
+            return None, "Patient username and password are required."
+        existing = Account.query.filter(Account.username == normalized_username, Account.patient_id != patient.id).first()
+        if existing:
+            return None, "That patient username is already in use."
+        account = Account(
+            role="PATIENT",
+            username=normalized_username,
+            password=generate_password_hash(password, method="pbkdf2:sha256"),
+            patient_id=patient.id,
+            user_id=patient.user_id,
+        )
+        db.session.add(account)
+    return account, "Patient login saved."
+
+
+def admin_dashboard_redirect(account):
+    if account.role == "PATIENT":
+        return url_for("patient_dashboard")
+    if account.admin_user and not account.admin_user.patients:
+        return url_for("setup")
+    return url_for("index")
+
+
 def generate_dummy_video_stream():
     while True:
         yield (
@@ -1020,21 +1445,19 @@ with app.app_context():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
+        email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
-        user = User.query.filter_by(username=username).first()
+        account = Account.query.filter_by(role="ADMIN", email=email).first()
 
-        if not user:
+        if not account:
             flash("Account not found.", "error")
             return redirect(url_for("register"))
-        if not check_password_hash(user.password, password):
+        if not check_password_hash(account.password, password):
             flash("Incorrect password.", "error")
             return redirect(url_for("login"))
 
-        login_user(user)
-        if not user.patients:
-            return redirect(url_for("setup"))
-        return redirect(url_for("index"))
+        login_user(account)
+        return redirect(admin_dashboard_redirect(account))
 
     return render_template("login.html")
 
@@ -1042,35 +1465,68 @@ def login():
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
+        email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
 
-        if User.query.filter_by(username=username).first():
-            flash("Username exists", "error")
+        if not email:
+            flash("Email is required.", "error")
+            return redirect(url_for("register"))
+        if Account.query.filter_by(email=email).first():
+            flash("Email already exists", "error")
             return redirect(url_for("register"))
 
         new_user = User(
-            username=username,
+            username=email,
             password=generate_password_hash(password, method="pbkdf2:sha256"),
         )
         db.session.add(new_user)
+        db.session.flush()
+        new_account = Account(
+            role="ADMIN",
+            email=email,
+            password=new_user.password,
+            user_id=new_user.id,
+        )
+        db.session.add(new_account)
         db.session.commit()
-        login_user(new_user)
+        login_user(new_account)
         return redirect(url_for("setup"))
 
     return render_template("register.html")
 
 
+@app.route("/patient/login", methods=["GET", "POST"])
+def patient_login():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        account = Account.query.filter_by(role="PATIENT", username=username).first()
+
+        if not account:
+            flash("Patient account not found.", "error")
+            return redirect(url_for("patient_login"))
+        if not check_password_hash(account.password, password):
+            flash("Incorrect password.", "error")
+            return redirect(url_for("patient_login"))
+
+        login_user(account)
+        return redirect(url_for("patient_dashboard"))
+
+    return render_template("patient_login.html")
+
+
 @app.route("/logout")
 @login_required
 def logout():
+    destination = "patient_login" if current_account() and current_account().role == "PATIENT" else "login"
     logout_user()
-    return redirect(url_for("login"))
+    return redirect(url_for(destination))
 
 
 @app.route("/setup", methods=["GET", "POST"])
-@login_required
+@admin_required
 def setup():
+    admin_user = current_admin_user()
     if request.method == "POST":
         data = request.get_json(silent=True) or {}
         patients_payload = data.get("patients", [])
@@ -1078,9 +1534,13 @@ def setup():
         if not patients_payload:
             return jsonify({"success": False, "message": "Add at least one patient."}), 400
 
-        existing_patients = Patient.query.filter_by(user_id=current_user.id).all()
+        existing_patients = Patient.query.filter_by(user_id=admin_user.id).all()
         for patient in existing_patients:
-            RobotTask.query.filter_by(patient_id=patient.id, status="queued").delete()
+            RobotTask.query.filter_by(patient_id=patient.id).delete()
+            PatientHistory.query.filter_by(patient_id=patient.id).delete()
+            account = patient_account_for_patient(patient)
+            if account:
+                db.session.delete(account)
             Medication.query.filter_by(patient_id=patient.id).delete()
             db.session.delete(patient)
         db.session.flush()
@@ -1105,7 +1565,7 @@ def setup():
                     {"success": False, "message": f"Add at least one medication for {patient_name}."}
                 ), 400
 
-            patient = Patient(name=patient_name, user_id=current_user.id, room_number=room_number)
+            patient = Patient(name=patient_name, user_id=admin_user.id, room_number=room_number)
             db.session.add(patient)
             db.session.flush()
             created_patients.append(patient)
@@ -1156,49 +1616,209 @@ def setup():
 @app.route("/")
 def landing():
     if current_user.is_authenticated:
-        return redirect(url_for("index"))
+        return redirect(admin_dashboard_redirect(current_account()))
     return render_template("landing.html")
 
 
 @app.route("/dashboard")
-@login_required
+@admin_required
 def index():
-    return render_template("index.html", user=current_user)
+    return render_template("index.html", user=current_admin_user())
+
+
+@app.route("/patients")
+@admin_required
+def patients_page():
+    admin_user = current_admin_user()
+    patients = Patient.query.filter_by(user_id=admin_user.id).order_by(Patient.name.asc()).all()
+    recent_history = {patient.id: patient_history_entries(patient, limit=5) for patient in patients}
+    return render_template("patients.html", user=admin_user, patients=patients, recent_history=recent_history)
+
+
+@app.route("/patients/create", methods=["POST"])
+@admin_required
+def create_patient():
+    admin_user = current_admin_user()
+    name = (request.form.get("name") or "").strip()
+    room_number = normalize_room_number(request.form.get("room_number"))
+    if not name or not validate_room_number(room_number):
+        flash("Patient name and a valid room number are required.", "error")
+        return redirect(url_for("patients_page"))
+
+    patient = Patient(
+        user_id=admin_user.id,
+        name=name,
+        age=int(request.form.get("age")) if (request.form.get("age") or "").isdigit() else None,
+        gender=(request.form.get("gender") or "").strip() or None,
+        room_number=room_number,
+        emergency_notes=(request.form.get("emergency_notes") or "").strip() or None,
+    )
+    db.session.add(patient)
+    db.session.flush()
+
+    username = (request.form.get("patient_username") or "").strip()
+    password = request.form.get("patient_password") or ""
+    if username or password:
+        account, message = create_patient_account(patient, username, password)
+        if not account:
+            db.session.rollback()
+            flash(message, "error")
+            return redirect(url_for("patients_page"))
+
+    create_activity(admin_user.id, "Created Patient", f"{patient.name} added in room {patient.room_number}.")
+    db.session.commit()
+    flash(f"{patient.name} created.", "success")
+    return redirect(url_for("patients_page"))
+
+
+@app.route("/patients/<int:patient_id>/update", methods=["POST"])
+@admin_required
+def update_patient(patient_id):
+    admin_user = current_admin_user()
+    patient = get_owned_patient(patient_id)
+    if not patient:
+        flash("Patient not found.", "error")
+        return redirect(url_for("patients_page"))
+
+    name = (request.form.get("name") or "").strip()
+    room_number = normalize_room_number(request.form.get("room_number"))
+    if not name or not validate_room_number(room_number):
+        flash("Patient name and a valid room number are required.", "error")
+        return redirect(url_for("patients_page"))
+
+    patient.name = name
+    patient.room_number = room_number
+    patient.age = int(request.form.get("age")) if (request.form.get("age") or "").isdigit() else None
+    patient.gender = (request.form.get("gender") or "").strip() or None
+    patient.emergency_notes = (request.form.get("emergency_notes") or "").strip() or None
+
+    username = (request.form.get("patient_username") or "").strip()
+    password = request.form.get("patient_password") or ""
+    if username or password:
+        account, message = create_patient_account(patient, username, password)
+        if not account:
+            db.session.rollback()
+            flash(message, "error")
+            return redirect(url_for("patients_page"))
+
+    create_activity(admin_user.id, "Updated Patient", f"{patient.name} profile updated.")
+    db.session.commit()
+    flash(f"{patient.name} updated.", "success")
+    return redirect(url_for("patients_page"))
+
+
+@app.route("/patients/<int:patient_id>/delete", methods=["POST"])
+@admin_required
+def delete_patient_profile(patient_id):
+    admin_user = current_admin_user()
+    patient = get_owned_patient(patient_id)
+    if not patient:
+        flash("Patient not found.", "error")
+        return redirect(url_for("patients_page"))
+
+    patient_name = patient.name
+    account = patient_account_for_patient(patient)
+    RobotTask.query.filter_by(patient_id=patient.id).delete()
+    PatientHistory.query.filter_by(patient_id=patient.id).delete()
+    Medication.query.filter_by(patient_id=patient.id).delete()
+    if account:
+        db.session.delete(account)
+    db.session.delete(patient)
+    create_activity(admin_user.id, "Deleted Patient", f"{patient_name} removed from the portal.")
+    db.session.commit()
+    flash(f"{patient_name} deleted.", "success")
+    return redirect(url_for("patients_page"))
+
+
+@app.route("/patients/<int:patient_id>/history-note", methods=["POST"])
+@admin_required
+def add_patient_history_note(patient_id):
+    patient = get_owned_patient(patient_id)
+    if not patient:
+        flash("Patient not found.", "error")
+        return redirect(url_for("patients_page"))
+
+    symptom_name = (request.form.get("symptom_name") or "").strip() or None
+    details = (request.form.get("details") or "").strip() or None
+    improvement_percent = request.form.get("improvement_percent")
+    pain_level = request.form.get("pain_level")
+    temperature = request.form.get("temperature")
+    create_patient_history(
+        patient,
+        entry_type="progress_update",
+        title=(request.form.get("title") or "Caretaker update").strip() or "Caretaker update",
+        details=details,
+        symptom_name=symptom_name,
+        improvement_percent=int(improvement_percent) if (improvement_percent or "").isdigit() else None,
+        pain_level=int(pain_level) if (pain_level or "").isdigit() else None,
+        temperature=float(temperature) if temperature else None,
+        created_by_account=current_account(),
+    )
+    create_activity(current_admin_user().id, "Caretaker Note Added", f"Progress note added for {patient.name}.")
+    db.session.commit()
+    flash(f"History updated for {patient.name}.", "success")
+    return redirect(url_for("patients_page"))
 
 
 @app.route("/logs")
-@login_required
+@admin_required
 def logs_page():
     return render_template("logs.html")
 
 
 @app.route("/map")
-@login_required
+@admin_required
 def map_page():
     return render_template("map.html")
 
 
 @app.route("/history")
-@login_required
+@admin_required
 def history_page():
+    admin_user = current_admin_user()
     logs = (
-        ActivityLog.query.filter_by(user_id=current_user.id)
+        ActivityLog.query.filter_by(user_id=admin_user.id)
         .order_by(ActivityLog.timestamp.desc())
         .all()
     )
-    stats = stats_payload_for_user(current_user)
+    stats = stats_payload_for_user(admin_user)
     return render_template("history.html", logs=logs, stats=stats)
 
 
+@app.route("/patient/dashboard")
+@patient_required
+def patient_dashboard():
+    patient = current_patient_profile()
+    return render_template(
+        "patient_dashboard.html",
+        patient=patient,
+        recent_requests=serialize_recent_patient_requests(patient, limit=8),
+        history_preview=patient_history_entries(patient, limit=6),
+    )
+
+
+@app.route("/patient/history")
+@patient_required
+def patient_history_page():
+    patient = current_patient_profile()
+    return render_template(
+        "patient_history.html",
+        patient=patient,
+        entries=patient_history_entries(patient),
+        stats=stats_payload_for_patient(patient),
+    )
+
+
 @app.route("/api/stats")
-@login_required
+@admin_required
 def get_stats():
-    return jsonify(stats_payload_for_user(current_user))
+    return jsonify(stats_payload_for_user(current_admin_user()))
 
 
 @app.route("/api/map/save", methods=["POST"])
-@login_required
+@admin_required
 def save_map():
+    admin_user = current_admin_user()
     data = request.get_json(silent=True) or {}
     grid = data.get("grid")
     rooms = data.get("rooms", {})
@@ -1227,15 +1847,15 @@ def save_map():
             continue
 
     payload = {"grid": grid, "rooms": normalized_rooms, "base": base}
-    save_map_payload(current_user.id, payload)
+    save_map_payload(admin_user.id, payload)
     db.session.commit()
     return jsonify({"success": True, "message": "Map layout saved.", **payload})
 
 
 @app.route("/api/map/load")
-@login_required
+@admin_required
 def load_map():
-    payload = parse_map_payload(UserMap.query.filter_by(user_id=current_user.id).first())
+    payload = parse_map_payload(UserMap.query.filter_by(user_id=current_admin_user().id).first())
     return jsonify({"success": True, **payload})
 
 
@@ -1246,21 +1866,22 @@ def robot_map(user_id):
 
 
 @app.route("/api/schedule")
-@login_required
+@admin_required
 def get_schedule():
-    return jsonify(schedule_payload_for_user(current_user))
+    return jsonify(schedule_payload_for_user(current_admin_user()))
 
 
 @app.route("/api/schedule/today")
-@login_required
+@admin_required
 def get_today_schedule():
-    return jsonify(today_schedule_api_payload(current_user))
+    return jsonify(today_schedule_api_payload(current_admin_user()))
 
 
 @app.route("/api/schedule/complete", methods=["POST"])
-@login_required
+@admin_required
 def complete_schedule_item():
     data = request.get_json(silent=True) or {}
+    admin_user = current_admin_user()
     medication = get_owned_medication(data.get("task_id"))
     if not medication:
         return jsonify({"success": False, "message": "Medication not found."}), 404
@@ -1271,9 +1892,17 @@ def complete_schedule_item():
         if medication.stock > 0:
             medication.stock -= 1
         create_activity(
-            current_user.id,
+            admin_user.id,
             f"Dispensed {medication.name}",
             f"Marked complete through dashboard API. Stock now {medication.stock}.",
+        )
+        create_patient_history(
+            medication.patient,
+            "medicine_taken",
+            title=f"{medication.name} taken",
+            details=f"Marked complete by caretaker. Stock now {medication.stock}.",
+            medication=medication,
+            created_by_account=current_account(),
         )
         db.session.commit()
 
@@ -1281,10 +1910,10 @@ def complete_schedule_item():
 
 
 @app.route("/api/inventory")
-@login_required
+@admin_required
 def get_inventory():
     inventory = []
-    for patient in current_user.patients:
+    for patient in current_admin_user().patients:
         for med in patient.medications:
             status = "ok"
             if med.stock < 2:
@@ -1308,9 +1937,9 @@ def get_inventory():
 
 
 @app.route("/api/vitals/current")
-@login_required
+@admin_required
 def current_vitals():
-    state = get_or_create_robot_state(current_user.id)
+    state = get_or_create_robot_state(current_admin_user().id)
     return jsonify(
         {
             "heart_rate": state.heart_rate,
@@ -1323,9 +1952,10 @@ def current_vitals():
 
 
 @app.route("/api/system/health")
-@login_required
+@admin_required
 def system_health():
-    state = get_or_create_robot_state(current_user.id)
+    admin_user = current_admin_user()
+    state = get_or_create_robot_state(admin_user.id)
     return jsonify(
         {
             "server": "online",
@@ -1333,43 +1963,44 @@ def system_health():
             "bluetooth": bool(state.bluetooth_connected),
             "database": True,
             "timestamp": datetime.now().isoformat(),
-            "queue_depth": RobotTask.query.filter_by(user_id=current_user.id, status="queued").count(),
+            "queue_depth": RobotTask.query.filter_by(user_id=admin_user.id, status="queued").count(),
         }
     )
 
 
 @app.route("/api/robot/status")
-@login_required
+@admin_required
 def get_robot_status():
-    state = get_or_create_robot_state(current_user.id)
+    state = get_or_create_robot_state(current_admin_user().id)
     return jsonify(serialize_robot_state(state))
 
 
 @app.route("/api/robot/get_state")
-@login_required
+@admin_required
 def get_robot_state():
-    state = get_or_create_robot_state(current_user.id)
+    state = get_or_create_robot_state(current_admin_user().id)
     return jsonify(serialize_robot_state(state))
 
 
 @app.route("/api/robot/command", methods=["POST"])
-@login_required
+@admin_required
 def robot_command():
+    admin_user = current_admin_user()
     data = request.get_json(silent=True) or {}
     command = (data.get("command") or "").strip().lower()
     if command not in ROBOT_COMMANDS:
         return jsonify({"success": False, "message": "Unsupported robot command."}), 400
 
-    task, message = queue_robot_command_for_user(current_user.id, command, source="dashboard")
-    create_activity(current_user.id, "Queued Robot Command", message)
+    task, message = queue_robot_command_for_user(admin_user.id, command, source="dashboard")
+    create_activity(admin_user.id, "Queued Robot Command", message)
     db.session.commit()
     return jsonify({"success": True, "message": message, "task_id": task.id})
 
 
 @app.route("/camera/privacy", methods=["POST"])
-@login_required
+@admin_required
 def toggle_camera_privacy():
-    state = get_or_create_robot_state(current_user.id)
+    state = get_or_create_robot_state(current_admin_user().id)
     if camera_service and hasattr(camera_service, "toggle_privacy"):
         privacy_mode = camera_service.toggle_privacy()
     else:
@@ -1381,6 +2012,7 @@ def toggle_camera_privacy():
 
 
 @app.route("/video_feed")
+@admin_required
 def video_feed():
     if camera_service and hasattr(camera_service, "generate_stream"):
         generator = camera_service.generate_stream()
@@ -1394,8 +2026,9 @@ def video_feed():
 
 
 @app.route("/api/ai/symptom-check", methods=["POST"])
-@login_required
+@admin_required
 def symptom_check():
+    admin_user = current_admin_user()
     user_input = (request.get_json(silent=True) or {}).get("symptoms", "")
     if not user_input:
         return jsonify({"success": False, "message": "Please describe the symptoms."}), 400
@@ -1404,9 +2037,9 @@ def symptom_check():
         emergency_msg = (
             "This sounds like a medical emergency. Please stop this chat and call emergency services (911) immediately."
         )
-        send_emergency_email(current_user.username, f"Emergency symptoms reported: {user_input}")
+        send_emergency_email(admin_user.username, f"Emergency symptoms reported: {user_input}", recipient_email=get_alert_email_for_user(admin_user))
         create_activity(
-            current_user.id,
+            admin_user.id,
             "Symptom Check Emergency",
             f"Emergency symptoms reported: {user_input[:100]}",
         )
@@ -1418,7 +2051,7 @@ def symptom_check():
 
     system_instruction = f"""
     You are an expert Medical Triage Assistant.
-    CURRENT PATIENT MEDS: {get_user_context()}
+    CURRENT PATIENT MEDS: {get_user_context(user=admin_user)}
 
     INSTRUCTIONS:
     1. Start with a brief disclaimer: "I am an AI, not a doctor."
@@ -1433,7 +2066,7 @@ def symptom_check():
     try:
         response = model.generate_content(system_instruction)
         create_activity(
-            current_user.id,
+            admin_user.id,
             "Symptom Check",
             f"User queried: {user_input[:80]}",
         )
@@ -1445,10 +2078,15 @@ def symptom_check():
 
 
 @app.route("/api/voice/process", methods=["POST"])
-@login_required
+@admin_required
 def process_voice():
     user_text = (request.get_json(silent=True) or {}).get("text", "")
-    result = interpret_command_text(current_user, user_text, source="voice")
+    result = interpret_command_text(
+        current_admin_user(),
+        user_text,
+        source="voice",
+        created_by_account=current_account(),
+    )
     if result["success"]:
         db.session.commit()
         return jsonify(result)
@@ -1457,11 +2095,12 @@ def process_voice():
 
 
 @app.route("/api/task/add", methods=["POST"])
-@login_required
+@admin_required
 def add_task():
+    admin_user = current_admin_user()
     data = request.get_json(silent=True) or {}
     patient_id = data.get("patient_id")
-    patient = get_owned_patient(patient_id) if patient_id else get_primary_patient(current_user)
+    patient = get_owned_patient(patient_id) if patient_id else get_primary_patient(admin_user)
     if not patient:
         return jsonify({"success": False, "message": "Select a valid patient first."}), 400
 
@@ -1490,7 +2129,7 @@ def add_task():
     )
     db.session.add(new_med)
     create_activity(
-        current_user.id,
+        admin_user.id,
         f"Added {name}",
         f"Medication added for {patient.name} at {schedule_time} in room {patient.room_number}.",
     )
@@ -1499,22 +2138,24 @@ def add_task():
 
 
 @app.route("/api/task/delete", methods=["POST"])
-@login_required
+@admin_required
 def delete_task():
+    admin_user = current_admin_user()
     medication = get_owned_medication((request.get_json(silent=True) or {}).get("id"))
     if not medication:
         return jsonify({"success": False, "message": "Medication not found."}), 404
 
     med_name = medication.name
     db.session.delete(medication)
-    create_activity(current_user.id, f"Deleted {med_name}", "Medication removed from schedule.")
+    create_activity(admin_user.id, f"Deleted {med_name}", "Medication removed from schedule.")
     db.session.commit()
     return jsonify({"success": True})
 
 
 @app.route("/api/task/toggle", methods=["POST"])
-@login_required
+@admin_required
 def toggle_task():
+    admin_user = current_admin_user()
     medication = get_owned_medication((request.get_json(silent=True) or {}).get("id"))
     if not medication:
         return jsonify({"success": False, "message": "Medication not found."}), 404
@@ -1526,7 +2167,7 @@ def toggle_task():
         if medication.stock < medication.max_stock:
             medication.stock += 1
         create_activity(
-            current_user.id,
+            admin_user.id,
             f"Undo: {medication.name}",
             f"Stock restored to {medication.stock}.",
         )
@@ -1536,9 +2177,17 @@ def toggle_task():
         medication.last_taken = today_str
         medication.stock -= 1
         create_activity(
-            current_user.id,
+            admin_user.id,
             f"Dispensed {medication.name}",
             f"Stock reduced to {medication.stock}.",
+        )
+        create_patient_history(
+            medication.patient,
+            "medicine_taken",
+            title=f"{medication.name} taken",
+            details=f"Marked complete by caretaker. Stock reduced to {medication.stock}.",
+            medication=medication,
+            created_by_account=current_account(),
         )
 
     db.session.commit()
@@ -1546,14 +2195,20 @@ def toggle_task():
 
 
 @app.route("/api/request", methods=["POST"])
-@login_required
+@admin_required
 def handle_request():
+    admin_user = current_admin_user()
     data = request.get_json(silent=True) or {}
     request_type = (data.get("type") or "").strip().lower()
     if request_type not in {"medicine", "water", "help"}:
         return jsonify({"success": False, "message": "Unsupported request type."}), 400
 
-    task, message = create_dashboard_request(current_user, request_type, source="dashboard")
+    task, message = create_dashboard_request(
+        admin_user,
+        request_type,
+        source="dashboard",
+        created_by_account=current_account(),
+    )
     if not task:
         db.session.rollback()
         return jsonify({"success": False, "message": message}), 400
@@ -1563,16 +2218,137 @@ def handle_request():
 
 
 @app.route("/api/emergency", methods=["POST"])
-@login_required
+@admin_required
 def emergency_request():
-    task, message = create_dashboard_request(current_user, "help", source="dashboard")
+    admin_user = current_admin_user()
+    task, message = create_dashboard_request(
+        admin_user,
+        "help",
+        source="dashboard",
+        created_by_account=current_account(),
+    )
     if not task:
         db.session.rollback()
         return jsonify({"success": False, "message": message}), 400
 
-    queue_robot_command_for_user(current_user.id, "emergency", source="dashboard")
+    queue_robot_command_for_user(admin_user.id, "emergency", source="dashboard")
     db.session.commit()
     return jsonify({"success": True, "message": message})
+
+
+@app.route("/api/patients/<int:patient_id>/history")
+@admin_required
+def admin_patient_history_api(patient_id):
+    patient = get_owned_patient(patient_id)
+    if not patient:
+        return jsonify({"success": False, "message": "Patient not found."}), 404
+    return jsonify({"success": True, "entries": [serialize_patient_history(entry) for entry in patient_history_entries(patient)]})
+
+
+@app.route("/patient/api/request", methods=["POST"])
+@patient_required
+def patient_request():
+    patient = current_patient_profile()
+    data = request.get_json(silent=True) or {}
+    request_type = (data.get("type") or "").strip().lower()
+    if request_type not in {"medicine", "water", "help"}:
+        return jsonify({"success": False, "message": "Unsupported request type."}), 400
+
+    task, message = create_request_for_patient(
+        patient,
+        request_type,
+        source="patient_portal",
+        created_by_account=current_account(),
+    )
+    if not task:
+        db.session.rollback()
+        return jsonify({"success": False, "message": message}), 400
+
+    db.session.commit()
+    return jsonify({"success": True, "message": message, "task_id": task.id, "status": task.status})
+
+
+@app.route("/patient/api/requests")
+@patient_required
+def patient_requests_api():
+    return jsonify({"success": True, "items": serialize_recent_patient_requests(current_patient_profile(), limit=12)})
+
+
+@app.route("/patient/api/history")
+@patient_required
+def patient_history_api():
+    patient = current_patient_profile()
+    return jsonify({"success": True, "entries": [serialize_patient_history(entry) for entry in patient_history_entries(patient)]})
+
+
+@app.route("/patient/api/voice/process", methods=["POST"])
+@patient_required
+def patient_voice_process():
+    patient = current_patient_profile()
+    user_text = (request.get_json(silent=True) or {}).get("text", "")
+    result = interpret_patient_command_text(
+        patient,
+        user_text,
+        source="patient_voice",
+        created_by_account=current_account(),
+    )
+    if result["success"]:
+        db.session.commit()
+        return jsonify(result)
+    db.session.rollback()
+    return jsonify(result), 400
+
+
+@app.route("/patient/api/ai/symptom-check", methods=["POST"])
+@patient_required
+def patient_symptom_check():
+    patient = current_patient_profile()
+    user_input = (request.get_json(silent=True) or {}).get("symptoms", "")
+    if not user_input:
+        return jsonify({"success": False, "message": "Please describe the symptoms."}), 400
+
+    if contains_emergency(user_input):
+        emergency_msg = (
+            "This sounds like a medical emergency. Please stop this chat and call emergency services (911) immediately."
+        )
+        send_emergency_email(
+            patient.name,
+            f"Emergency symptoms reported by patient: {user_input}",
+            recipient_email=get_alert_email_for_user(patient.caregiver),
+        )
+        create_activity(
+            patient.user_id,
+            "Patient Symptom Check Emergency",
+            f"{patient.name} reported emergency symptoms: {user_input[:100]}",
+        )
+        db.session.commit()
+        return jsonify({"success": True, "is_emergency": True, "response": emergency_msg})
+
+    if not AI_AVAILABLE:
+        return jsonify({"success": False, "message": "AI service currently unavailable."})
+
+    system_instruction = f"""
+    You are an expert Medical Triage Assistant.
+    CURRENT PATIENT MEDS: {get_user_context(patient=patient)}
+
+    INSTRUCTIONS:
+    1. Start with a brief disclaimer: "I am an AI, not a doctor."
+    2. Analyze the user's symptoms: "{user_input}"
+    3. Look for potential interactions with their current medications listed above.
+    4. Provide 2-3 possible causes, phrased strictly as possibilities.
+    5. Suggest the type of doctor they should see.
+    6. If the symptoms are vague, ask 2 follow-up questions.
+    7. Be empathetic but professional.
+    """
+
+    try:
+        response = model.generate_content(system_instruction)
+        create_activity(patient.user_id, "Patient Symptom Check", f"{patient.name} queried: {user_input[:80]}")
+        db.session.commit()
+        return jsonify({"success": True, "is_emergency": False, "response": response.text})
+    except Exception as ai_error:
+        print(f"AI error: {ai_error}")
+        return jsonify({"success": False, "error": "The AI agent is resting. Please try again later."})
 
 
 @app.route("/api/robot/heartbeat/<int:user_id>", methods=["POST"])
@@ -1652,6 +2428,15 @@ def robot_task_complete():
 
     details = data.get("details") or task.response_message or f"{task.task_type} completed."
     create_activity(task.user_id, "Robot Task Completed", details)
+    if task.patient and task.task_type in {"water_delivery", "help_request"}:
+        history_type = "water_requested" if task.task_type == "water_delivery" else "sos_alert"
+        create_patient_history(
+            task.patient,
+            history_type,
+            title=task.response_message or task.task_type.replace("_", " ").title(),
+            details=details,
+            request_task=task,
+        )
     db.session.commit()
     return jsonify({"success": True})
 
@@ -1725,6 +2510,13 @@ def robot_mark_complete():
                 or f"Auto-dispensed by Pi for room {med.patient.room_number}. Stock now {med.stock}."
             )[:200],
         )
+        create_patient_history(
+            med.patient,
+            "medicine_taken",
+            title=f"{med.name} taken",
+            details=(data.get("details") or f"Robot delivery completed for {med.name}.")[:300],
+            medication=med,
+        )
 
     state = get_or_create_robot_state(med.patient.user_id)
     if not data.get("mission_active"):
@@ -1740,11 +2532,12 @@ def robot_mark_complete():
 
 
 @app.route("/seed_full_day")
-@login_required
+@admin_required
 def seed_full_day():
-    patient = Patient.query.filter_by(user_id=current_user.id).first()
+    admin_user = current_admin_user()
+    patient = Patient.query.filter_by(user_id=admin_user.id).first()
     if not patient:
-        patient = Patient(name="Grandpa Joe", user_id=current_user.id, room_number="A-101")
+        patient = Patient(name="Grandpa Joe", user_id=admin_user.id, room_number="A-101")
         db.session.add(patient)
         db.session.flush()
 

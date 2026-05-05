@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My History - Jacob AI</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: linear-gradient(180deg, #050505 0%, #0d0d12 100%);
+            color: white;
+            font-family: 'Inter', sans-serif;
+        }
+        .shell {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 28px 18px 40px;
+        }
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 22px;
+        }
+        .topbar h1 {
+            margin: 0;
+            font-size: 2rem;
+        }
+        .topbar p {
+            margin: 6px 0 0;
+            color: #9ca3af;
+        }
+        .topbar a {
+            color: white;
+            text-decoration: none;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 12px 16px;
+            border-radius: 999px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .stat {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 18px;
+            padding: 18px;
+        }
+        .stat span {
+            display: block;
+            color: #9ca3af;
+            font-size: 0.8rem;
+            margin-bottom: 8px;
+        }
+        .timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .entry {
+            background: rgba(20, 20, 22, 0.86);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            padding: 18px;
+        }
+        .entry strong {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 1rem;
+        }
+        .meta {
+            color: #9ca3af;
+            font-size: 0.82rem;
+            margin-top: 10px;
+        }
+        @media (max-width: 720px) {
+            .stats {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <div class="topbar">
+            <div>
+                <h1>My History</h1>
+                <p>Medicines taken, requests made, and caretaker progress notes for {{ patient.name }}.</p>
+            </div>
+            <a href="/patient/dashboard">Back to Dashboard</a>
+        </div>
+
+        <div class="stats">
+            <div class="stat"><span>Today's Medicines</span><strong>{{ stats.total }}</strong></div>
+            <div class="stat"><span>Taken Today</span><strong>{{ stats.taken }}</strong></div>
+            <div class="stat"><span>Pending Requests</span><strong>{{ stats.requests.queued }}</strong></div>
+            <div class="stat"><span>Adherence</span><strong>{{ stats.score }}%</strong></div>
+        </div>
+
+        <div class="timeline">
+            {% for entry in entries %}
+            <div class="entry">
+                <strong>{{ entry.title }}</strong>
+                <div>{{ entry.details or 'No extra details.' }}</div>
+                {% if entry.symptom_name or entry.improvement_percent is not none or entry.pain_level is not none or entry.temperature is not none %}
+                <div class="meta">
+                    {% if entry.symptom_name %}Symptom: {{ entry.symptom_name }}{% endif %}
+                    {% if entry.improvement_percent is not none %} · Improvement: {{ entry.improvement_percent }}%{% endif %}
+                    {% if entry.pain_level is not none %} · Pain: {{ entry.pain_level }}/10{% endif %}
+                    {% if entry.temperature is not none %} · Temperature: {{ entry.temperature }}°C{% endif %}
+                </div>
+                {% endif %}
+                <div class="meta">{{ entry.created_at.strftime('%b %d, %Y %I:%M %p') }}</div>
+            </div>
+            {% else %}
+            <div class="entry">
+                <strong>No history recorded yet.</strong>
+                <div>Your medicines, requests, and caretaker progress notes will appear here.</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</body>
+</html>

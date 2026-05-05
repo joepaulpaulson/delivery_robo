@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Patient Login - Jacob AI</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            background-color: #000;
+            font-family: 'Inter', sans-serif;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 24px;
+            box-sizing: border-box;
+        }
+        .bg-glow {
+            position: absolute;
+            width: 580px;
+            height: 580px;
+            background: radial-gradient(circle, rgba(14, 165, 233, 0.18) 0%, rgba(0, 0, 0, 0) 70%);
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: -1;
+        }
+        .card {
+            width: 100%;
+            max-width: 420px;
+            padding: 36px;
+            background: rgba(25, 25, 25, 0.72);
+            backdrop-filter: blur(18px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 28px;
+            box-sizing: border-box;
+        }
+        h1 {
+            margin: 0 0 10px;
+            font-size: 2rem;
+            font-weight: 800;
+        }
+        p {
+            color: #9ca3af;
+            margin: 0 0 24px;
+        }
+        input {
+            width: 100%;
+            padding: 16px;
+            margin-bottom: 14px;
+            border-radius: 12px;
+            border: 1px solid #333;
+            background: rgba(0, 0, 0, 0.28);
+            color: white;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+        button {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 999px;
+            background: white;
+            color: black;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .flash {
+            color: #f87171;
+            margin-bottom: 16px;
+            font-size: 0.95rem;
+        }
+        .links {
+            margin-top: 18px;
+            font-size: 0.9rem;
+            color: #9ca3af;
+        }
+        .links a {
+            color: #38bdf8;
+            text-decoration: none;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-glow"></div>
+    <div class="card">
+        <h1>Patient Login</h1>
+        <p>Sign in with the username and password created by your caretaker.</p>
+
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <div class="flash">{{ messages[0] }}</div>
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="/patient/login">
+            <input type="text" name="username" placeholder="Patient Username" required>
+            <input type="password" name="password" placeholder="Password" required>
+            <button type="submit">Open Patient Dashboard</button>
+        </form>
+
+        <div class="links">
+            Caretaker? <a href="/login">Caretaker Login</a>
+        </div>
+    </div>
+</body>
+</html>

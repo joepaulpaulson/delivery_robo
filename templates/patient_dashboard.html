@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patient Dashboard - Jacob AI</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #060606;
+            --panel: rgba(22, 22, 24, 0.88);
+            --border: rgba(255, 255, 255, 0.08);
+            --muted: #9ca3af;
+            --accent: #38bdf8;
+            --success: #34d399;
+            --danger: #f87171;
+        }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at top, rgba(56, 189, 248, 0.14), transparent 35%),
+                linear-gradient(180deg, #050505 0%, #0d0d10 100%);
+            color: white;
+            font-family: 'Inter', sans-serif;
+        }
+        .shell {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 28px 18px 40px;
+        }
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 22px;
+        }
+        .title h1 {
+            margin: 0;
+            font-size: 2rem;
+        }
+        .title p {
+            margin: 6px 0 0;
+            color: var(--muted);
+        }
+        .topbar a {
+            color: white;
+            text-decoration: none;
+            border: 1px solid var(--border);
+            padding: 12px 16px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .hero {
+            display: grid;
+            grid-template-columns: 1.3fr 0.9fr;
+            gap: 18px;
+            margin-bottom: 18px;
+        }
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 22px;
+            box-sizing: border-box;
+        }
+        .panel h2 {
+            margin: 0 0 12px;
+            font-size: 1.1rem;
+        }
+        .meta {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+        .meta-card {
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 18px;
+            padding: 14px;
+        }
+        .meta-card span {
+            display: block;
+            color: var(--muted);
+            font-size: 0.78rem;
+            margin-bottom: 6px;
+        }
+        .action-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+        .action-grid button {
+            border: none;
+            border-radius: 18px;
+            padding: 18px;
+            font-size: 1rem;
+            font-weight: 700;
+            color: white;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .action-grid .danger {
+            background: rgba(248, 113, 113, 0.18);
+            color: #fecaca;
+        }
+        .action-grid .accent {
+            background: rgba(56, 189, 248, 0.18);
+        }
+        .status-line {
+            margin-top: 14px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--muted);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 18px;
+        }
+        textarea,
+        input {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.04);
+            color: white;
+            border-radius: 16px;
+            padding: 14px;
+            font-family: inherit;
+            font-size: 0.95rem;
+        }
+        .stack {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .stack button,
+        .voice-bar button {
+            border: none;
+            border-radius: 16px;
+            padding: 14px 16px;
+            font-weight: 700;
+            cursor: pointer;
+            background: white;
+            color: black;
+        }
+        .voice-bar {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .request-item,
+        .history-item {
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 16px;
+            padding: 14px;
+        }
+        .request-item strong,
+        .history-item strong {
+            display: block;
+            margin-bottom: 4px;
+        }
+        .muted {
+            color: var(--muted);
+            font-size: 0.86rem;
+        }
+        .link-row {
+            margin-top: 14px;
+        }
+        .link-row a {
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 600;
+        }
+        @media (max-width: 860px) {
+            .hero,
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <div class="topbar">
+            <div class="title">
+                <h1>Patient Dashboard</h1>
+                <p>Welcome, {{ patient.name }}. Your caretaker can see the same request and progress timeline.</p>
+            </div>
+            <a href="/logout">Logout</a>
+        </div>
+
+        <div class="hero">
+            <div class="panel">
+                <h2>Quick Requests</h2>
+                <div class="action-grid">
+                    <button class="accent" onclick="sendPatientRequest('water')">Request Water</button>
+                    <button class="accent" onclick="sendPatientRequest('medicine')">Request Medicine</button>
+                    <button class="danger" onclick="sendPatientRequest('help')">SOS Emergency</button>
+                    <button onclick="submitManualPatientCommand()">Send Manual Request</button>
+                </div>
+                <div id="patientStatus" class="status-line">Status: Ready</div>
+            </div>
+
+            <div class="panel">
+                <h2>My Profile</h2>
+                <div class="meta">
+                    <div class="meta-card">
+                        <span>Room</span>
+                        <strong>{{ patient.room_number }}</strong>
+                    </div>
+                    <div class="meta-card">
+                        <span>Age</span>
+                        <strong>{{ patient.age or 'Not Set' }}</strong>
+                    </div>
+                    <div class="meta-card">
+                        <span>Gender</span>
+                        <strong>{{ patient.gender or 'Not Set' }}</strong>
+                    </div>
+                </div>
+                {% if patient.emergency_notes %}
+                <div class="status-line" style="margin-top: 12px;">
+                    <strong>Emergency Notes</strong><br>
+                    {{ patient.emergency_notes }}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="panel">
+                <h2>Voice and Manual Requests</h2>
+                <div class="voice-bar">
+                    <button type="button" id="voiceBtn">Tap to Speak</button>
+                    <span id="voiceHint" class="muted">Say water, medicine, SOS, or return robot.</span>
+                </div>
+                <div class="stack" style="margin-top: 14px;">
+                    <textarea id="manualCommandInput" rows="4" placeholder="Example: bring medicine or return robot"></textarea>
+                    <button type="button" onclick="submitManualPatientCommand()">Send Request</button>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>AI Symptom Checker</h2>
+                <div class="stack">
+                    <input type="text" id="symptomInput" placeholder="Describe your symptoms or pain">
+                    <button type="button" onclick="submitPatientSymptomCheck()">Analyze Symptoms</button>
+                    <div id="symptomResponse" class="status-line">The AI symptom checker is ready.</div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>Recent Requests</h2>
+                <div id="patientRequestList" class="list">
+                    {% for item in recent_requests %}
+                    <div class="request-item">
+                        <strong>{{ item.label }}</strong>
+                        <div class="muted">{{ item.status }}{% if item.message %} · {{ item.message }}{% endif %}</div>
+                    </div>
+                    {% else %}
+                    <div class="request-item"><strong>No requests yet</strong><div class="muted">Your water, medicine, and SOS requests will appear here.</div></div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="panel">
+                <h2>History Preview</h2>
+                <div class="list">
+                    {% for entry in history_preview %}
+                    <div class="history-item">
+                        <strong>{{ entry.title }}</strong>
+                        <div class="muted">{{ entry.details or 'No extra details.' }}</div>
+                    </div>
+                    {% else %}
+                    <div class="history-item"><strong>No history yet</strong><div class="muted">Medicine events and caretaker notes will appear here.</div></div>
+                    {% endfor %}
+                </div>
+                <div class="link-row"><a href="/patient/history">Open Full History</a></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/patient.js') }}"></script>
+</body>
+</html>

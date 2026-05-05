@@ -65,17 +65,17 @@
 <body>
     <div class="bg-glow"></div>
     <div class="card">
-        <h1>New Account</h1>
-        <p>Join the Jacob network.</p>
+        <h1>New Caretaker Account</h1>
+        <p>Create the admin portal for your Jacob robot.</p>
         
         {% with messages = get_flashed_messages() %}
             {% if messages %} <div style="color:#f56565; margin-bottom:15px;">{{ messages[0] }}</div> {% endif %}
         {% endwith %}
 
         <form method="POST" action="/register">
-            <input type="text" name="username" placeholder="Choose Username" required>
+            <input type="email" name="email" placeholder="Caretaker Email" required>
             <input type="password" name="password" placeholder="Create Password" required>
-            <button type="submit" class="btn-primary">Create ID</button>
+            <button type="submit" class="btn-primary">Create Admin Account</button>
         </form>
         <div class="links">Already have an ID? <a href="/login">Sign In</a></div>
     </div>
